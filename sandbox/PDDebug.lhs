@@ -13,7 +13,7 @@ includes now ordering on environment
 > import Monad
 > import List 
 > import Data.Bits
-> import Char (ord)
+> import Data.Char (ord)
 > import GHC.IO
 > import GHC.Int
 > import qualified Data.IntMap as IM
@@ -129,36 +129,36 @@ annotate a regex with position index
 
 > type Loc = Int
 
+> 
 
-> newtype DMonad h a = DMonad { runDM :: h -> (Maybe a, h) }
+> data Tree a = Leaf 
+>              | Single a (Tree a) 
+>              | Branch a (Tree a) (Tree a) deriving Show 
+
+> newtype DMonad h a = DMonad { runDM :: h -> (a, h) }
 
 > instance Monad (DMonad s) where
->    return a = DMonad (\h -> (Just a,h) )
->    (DMonad x) >>= f = DMonad (\h -> let (mba, h') = x h 
->                                     in case mba of 
->                                        Just a -> runDM (f a) h'
->                                        Nothing -> (Nothing, h')) 
+>    return a = DMonad (\h -> (a,h) )
+>    (DMonad x) >>= f = DMonad (\h -> let (a, h') = x h 
+>                                     in runDM (f a) h')
 
-> instance MonadPlus (DMonad [Loc]) where
->    mzero = DMonad (\ls -> (Nothing, ls))
->    p `mplus` q = DMonad (\ls -> case runDM p ls of 
->              { (Nothing, _) -> runDM q ls 
->              ; (Just r, ls') -> (Just r, ls') })
+
 
 > addLocM :: Loc -> DMonad [Loc] ()
-> addLocM loc = DMonad (\h -> (Just (),h++[loc]))
+> addLocM loc = DMonad (\h -> ((),h++[loc])) -- todo
 
 
 > derivM :: RE -> Char -> DMonad [Loc] RE
-> derivM Phi l = mzero
-> derivM Empty l = mzero
+> derivM Phi l = return Phi
+> derivM Empty l = return Phi
 > derivM (L l' loc) l | l == l' = addLocM loc >> return Empty
->                     | otherwise = mzero
+>                     | otherwise = return Phi
 > derivM (Seq r1 r2) l 
 >  | isEmpty r1 = do 
 >       { r1' <- derivM r1 l
->       ; return (Seq r1' r2)
->       } `mplus` derivM r2 l
+>       ; r2' <- derivM r2 l                 
+>       ; return (Choice (Seq r1' r2) r2')
+>       } 
 >  | otherwise = do  
 >       { r1' <- derivM r1 l
 >       ; return (Seq r1' r2)
@@ -166,22 +166,74 @@ annotate a regex with position index
 > derivM (Choice r1 r2) l = 
 >  do { r1' <- derivM r1 l 
 >     ; r2' <- derivM r2 l 
->     ; return (Choice r1' r2') } `mplus`  -- this is required otherwise we commit to d(r1) only
->  derivM r1 l `mplus` derivM r2 l
-
+>     ; return (Choice r1' r2') } 
 > derivM (Star r) l = do 
 >  { r' <- derivM r l
 >  ; return (Seq r' (Star r))
 >  }
 
+> {-
+
+> append :: Tree Loc -> Tree Loc -> Tree Loc
+> append Leaf t = t -- root case
+> append (Single j t) t' = Single j (append t t')
+> append (Branch _ _ _) _ = error "append:error"
+
+> branch :: Tree Loc -> Tree Loc -> Tree Loc -> Tree Loc 
+> branch Leaf t1 t2 = Branch 0 t1 t2 -- root case
+> branch (Single j t) t1 t2 = Single j (Branch t t1 t2)
+
+> derivS ::  Tree Loc -> RE -> Char ->  (Tree Loc, RE)
+> derivS t Phi l = (t, Phi)                        
+> derivS t Empty l = (t, Phi)
+> derivS t (L l loc) l' | l == l' = (append t (Single loc Leaf), Empty)
+>                       | otherwise = (Leaf, Phi)
+> derivS t (Choice r1 r2) l = 
+>    let (t1',r1') = derivS t1 r1 l
+>        (t2',r2') = derivS t2 r2 l          
+>    in (branch Leaf i t1' t2', Choice r1' r2')
+> derivS t (Seq r1 r2) l 
+>    | isEmpty r1 = 
+>      let (t1,r1') = derivS r1 l   
+>          (t2,r2') = derivS r2 l 
+>      in (branch t t1 t2, Choice (Seq r1' r2) r2')
+>    | otherwise =
+>      let (t1,r1') = derivS r1 l
+>      in (branch t i t1, Seq r1' r2)
+> derivS (Star r) l = 
+>    let (t',r') = derivS t r l
+>    in (t', Seq r' (Star r))
+
+
+> -}
 
 runDM  (do { r1' <- derivM  (rAnnotate r1) 'A' ; r1'' <- derivM r1' 'A' ; derivM r1'' 'A' }) []
            
+
+
+> pderivT :: [(RE, [Loc])] -> Char -> [(RE, [Loc])]
+> pderivT rs c = nub2 $ concatMap (\r -> pdT r c) rs
+
+> pdT :: (RE, [Loc]) -> Char -> [(RE, [Loc])]
+> pdT (Phi, locs) c = []
+> pdT (Empty, locs) c = []
+> pdT (L l loc, locs) c | l == c = [(Empty, locs ++ [loc])]
+>                       | otherwise = []
+> pdT (Seq r1 r2, locs) c 
+>   | isEmpty r1 = ([ (Seq r1' r2, locs') | (r1',locs') <- pdT (r1,locs) c ] ++ (pdT (r2,locs) c))
+>   | otherwise  = [ (Seq r1' r2, locs') | (r1',locs') <- pdT (r1,locs) c ]
+> pdT (Choice r1 r2, locs) c =
+>  pdT (r1,locs) c ++ pdT (r2,locs) c
+> pdT (Star r, locs) c = 
+>  [ (Seq r' (Star r), locs') | (r',locs') <- pdT (r,locs) c  ]
+
 
 a PDMonad is a State Monad / Parsec
 
 s is the probably the history of the locations that a match visited
 a is the resulting pd
+
+the monadic version is exactly the same as the pderivT modulo nubbing, which is not required for debugging purpose
 
 > newtype PDMonad h a = PDMonad { runPDM :: h -> [(a,h)] } 
  
@@ -189,7 +241,7 @@ a is the resulting pd
 >    -- return :: a -> PDMonad s a
 >    return a        = PDMonad (\h -> [(a,h)])
 >    -- (>>=) :: PDMonad h a -> (a -> PDMonad h b) -> PDMonad h b
->    (PDMonad x) >>= f = PDMonad (\h -> {- nub2 $ -} concat [ runPDM (f a) h' | (a,h') <- x h ])
+>    (PDMonad x) >>= f = PDMonad (\h -> concat [ runPDM (f a) h' | (a,h') <- x h ])
 
 
 > instance MonadPlus (PDMonad [Loc]) where
@@ -197,6 +249,7 @@ a is the resulting pd
 >    p `mplus` q = PDMonad (\ls -> runPDM p ls ++ runPDM q ls)
 
                   
+nubM does not really work, because the duplicate is introduced via the >>= operation.
 
 > nubM :: Eq r => PDMonad h r -> PDMonad h r
 > nubM pdm = PDMonad (\h -> nub2 (runPDM pdm h))
@@ -211,20 +264,21 @@ a is the resulting pd
 > pderivM Empty l = mzero
 > pderivM (L l' loc) l | l' == l = addLoc loc >> return Empty
 >                      | otherwise = mzero
-> pderivM (Choice r1 r2) l = nubM $ mplus (pderivM r1 l) (pderivM r2 l)
-> pderivM (Star r) l = nubM $ do { r' <- pderivM r l 
+> pderivM (Choice r1 r2) l = mplus (pderivM r1 l) (pderivM r2 l)
+> pderivM (Star r) l = do { r' <- pderivM r l 
 >                         ; return (Seq r' (Star r))
 >                         }
 > pderivM (Seq r1 r2) l
->     | isEmpty r1 = nubM $ (do                                   
+>     | isEmpty r1 = do                                   
 >        { r1' <- pderivM r1 l
->        ; return (Seq r1' r2) } `mplus` pderivM r2 l)
->     | otherwise = nubM $ do 
+>        ; return (Seq r1' r2) } `mplus` pderivM r2 l
+>     | otherwise = do 
 >        { r1' <- pderivM r1 l
 >        ; return (Seq r1' r2) }
                   
 
-start [] (do { r1' <- pderivM  (rAnnotate r1) 'A' ; r1'' <- nubM $ pderivM r1' 'A' ; pderivM r1'' 'A' })
+
+start [] (do { r1' <- pderivM r1 'A' ; r1'' <- nubM $ pderivM r1' 'A' ; pderivM r1'' 'A' })
 
 > nub2 :: Eq a => [(a,b)] -> [(a,b)]
 > nub2 = nubBy (\(p1,f1) (p2, f2) -> p1 == p2) 
