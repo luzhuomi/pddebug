@@ -131,6 +131,8 @@ annotate a regex with position index
 
 > 
 
+the derivative with Src Loc tracking is not working!!! todo.
+
 > data Tree a = Leaf 
 >              | Single a (Tree a) 
 >              | Branch a (Tree a) (Tree a) deriving Show 
@@ -210,22 +212,24 @@ annotate a regex with position index
 runDM  (do { r1' <- derivM  (rAnnotate r1) 'A' ; r1'' <- derivM r1' 'A' ; derivM r1'' 'A' }) []
            
 
+The good old partial derivative with src loc tracking
 
-> pderivT :: [(RE, [Loc])] -> Char -> [(RE, [Loc])]
-> pderivT rs c = nub2 $ concatMap (\r -> pdT r c) rs
 
-> pdT :: (RE, [Loc]) -> Char -> [(RE, [Loc])]
-> pdT (Phi, locs) c = []
-> pdT (Empty, locs) c = []
-> pdT (L l loc, locs) c | l == c = [(Empty, locs ++ [loc])]
->                       | otherwise = []
-> pdT (Seq r1 r2, locs) c 
->   | isEmpty r1 = ([ (Seq r1' r2, locs') | (r1',locs') <- pdT (r1,locs) c ] ++ (pdT (r2,locs) c))
->   | otherwise  = [ (Seq r1' r2, locs') | (r1',locs') <- pdT (r1,locs) c ]
-> pdT (Choice r1 r2, locs) c =
->  pdT (r1,locs) c ++ pdT (r2,locs) c
-> pdT (Star r, locs) c = 
->  [ (Seq r' (Star r), locs') | (r',locs') <- pdT (r,locs) c  ]
+> pderiv :: [(RE, [Loc])] -> Char -> [(RE, [Loc])]
+> pderiv rs c = nub2 $ concatMap (\r -> pd r c) rs
+
+> pd :: (RE, [Loc]) -> Char -> [(RE, [Loc])]
+> pd (Phi, locs) c = []
+> pd (Empty, locs) c = []
+> pd (L l loc, locs) c | l == c = [(Empty, locs ++ [loc])]
+>                      | otherwise = []
+> pd (Seq r1 r2, locs) c 
+>   | isEmpty r1 = ([ (Seq r1' r2, locs') | (r1',locs') <- pd (r1,locs) c ] ++ (pd (r2,locs) c))
+>   | otherwise  = [ (Seq r1' r2, locs') | (r1',locs') <- pd (r1,locs) c ]
+> pd (Choice r1 r2, locs) c =
+>   pd (r1,locs) c ++ pd (r2,locs) c
+> pd (Star r, locs) c = 
+>  [ (Seq r' (Star r), locs') | (r',locs') <- pd (r,locs) c  ]
 
 
 a PDMonad is a State Monad / Parsec
@@ -235,35 +239,52 @@ a is the resulting pd
 
 the monadic version is exactly the same as the pderivT modulo nubbing, which is not required for debugging purpose
 
-> newtype PDMonad h a = PDMonad { runPDM :: h -> [(a,h)] } 
+> newtype PDMonad t e a = PDMonad { runPDM :: t -> ([(a,t)],[e]) } -- ^ t captures the trace of src location, e denote the errors
  
-> instance Monad (PDMonad s) where
->    -- return :: a -> PDMonad s a
->    return a        = PDMonad (\h -> [(a,h)])
->    -- (>>=) :: PDMonad h a -> (a -> PDMonad h b) -> PDMonad h b
->    (PDMonad x) >>= f = PDMonad (\h -> concat [ runPDM (f a) h' | (a,h') <- x h ])
+> instance Monad (PDMonad t e) where
+>    return a        = PDMonad (\h -> ([(a,h)],[]))
+>    (PDMonad x) >>= f = PDMonad (\h -> let (succ'ed,failed) = x h
+>                                           (ahs, failed') = unzip [ runPDM (f a) h' | (a,h') <- succ'ed ] 
+>                                       in (concat ahs, failed ++ (concat failed')))
 
+> data PDError = LabelMismatch Loc [Loc]
+>              | EmptyMismatch [Loc]
+>              | PhiMismatch [Loc] deriving Show
 
-> instance MonadPlus (PDMonad [Loc]) where
->    mzero = PDMonad (\ls -> [])
->    p `mplus` q = PDMonad (\ls -> runPDM p ls ++ runPDM q ls)
+> instance MonadPlus (PDMonad [Loc] PDError) where
+>    mzero = PDMonad (\ls -> ([],[]))
+>    p `mplus` q = PDMonad (\ls -> let (x,y) = runPDM p ls 
+>                                      (w,z) = runPDM q ls
+>                                  in (x ++ w, y ++ z))
 
                   
 nubM does not really work, because the duplicate is introduced via the >>= operation.
 
-> nubM :: Eq r => PDMonad h r -> PDMonad h r
-> nubM pdm = PDMonad (\h -> nub2 (runPDM pdm h))
+> -- nubM :: Eq r => PDMonad h r -> PDMonad h r
+> -- nubM pdm = PDMonad (\h -> nub2 (runPDM pdm h))
 
 > start = flip runPDM
 
-> addLoc :: Loc -> PDMonad [Loc] ()
-> addLoc loc = PDMonad (\h -> [((),h++[loc])])
+> addLoc :: Loc -> PDMonad [Loc] PDError ()
+> addLoc loc = PDMonad (\h -> ([((),h++[loc])], []))
 
-> pderivM :: RE -> Char -> PDMonad [Loc] RE
-> pderivM Phi l = mzero
-> pderivM Empty l = mzero
+bring the current trace to the error
+
+> phiErr :: PDMonad [Loc] PDError ()
+> phiErr = PDMonad (\h -> ([((),h)], [(PhiMismatch h)]))
+
+> empErr :: PDMonad [Loc] PDError ()
+> empErr = PDMonad (\h -> ([((),h)], [(EmptyMismatch h)]))
+
+> labErr :: Loc -> PDMonad [Loc] PDError ()
+> labErr l = PDMonad (\h -> ([((),h)], [(LabelMismatch l h)]))
+
+> pderivM :: RE -> Char -> PDMonad [Loc] PDError RE
+> pderivM Phi l = phiErr >> mzero -- we never need Phi in partial derivatives, since it is represented in via []
+> pderivM Empty l = do { empErr -- we need this in case of (A1A2|A3B4) matching "AAA"
+>                      ; mzero } 
 > pderivM (L l' loc) l | l' == l = addLoc loc >> return Empty
->                      | otherwise = mzero
+>                      | otherwise = labErr loc >> mzero
 > pderivM (Choice r1 r2) l = mplus (pderivM r1 l) (pderivM r2 l)
 > pderivM (Star r) l = do { r' <- pderivM r l 
 >                         ; return (Seq r' (Star r))
@@ -278,7 +299,7 @@ nubM does not really work, because the duplicate is introduced via the >>= opera
                   
 
 
-start [] (do { r1' <- pderivM r1 'A' ; r1'' <- nubM $ pderivM r1' 'A' ; pderivM r1'' 'A' })
+start [] (do { r1' <- pderivM r1 'A' ; r1'' <- pderivM r1' 'A' ; pderivM r1'' 'A' })
 
 > nub2 :: Eq a => [(a,b)] -> [(a,b)]
 > nub2 = nubBy (\(p1,f1) (p2, f2) -> p1 == p2) 
@@ -293,4 +314,4 @@ start [] (do { r1' <- pderivM r1 'A' ; r1'' <- nubM $ pderivM r1' 'A' ; pderivM 
 > r1 = rAnnotate (Seq (Star (L 'A' 0)) (Star (L 'A' 0)))
 
 
-> r2 = rAnnotate (Choice (Seq (L 'A' 0) (L 'A' 0)) (Seq (L 'A' 0) (L 'B' 0)))
+> r2 = rAnnotate (Choice (Seq (L 'A' 0) (L 'B' 0)) (Seq (L 'A' 0) (L 'A' 0)))
