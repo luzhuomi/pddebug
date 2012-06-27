@@ -298,6 +298,11 @@ bring the current trace to the error
 >        ; return (Seq r1' r2) }
                   
 
+> matchM :: RE -> [Char] -> PDMonad[Loc] PDError RE 
+> matchM r [] = return r
+> matchM r (c:cs) = do { r' <- pderivM r c
+>                      ; matchM r' cs }
+
 
 start [] (do { r1' <- pderivM r1 'A' ; r1'' <- pderivM r1' 'A' ; pderivM r1'' 'A' })
 
@@ -315,3 +320,14 @@ start [] (do { r1' <- pderivM r1 'A' ; r1'' <- pderivM r1' 'A' ; pderivM r1'' 'A
 
 
 > r2 = rAnnotate (Choice (Seq (L 'A' 0) (L 'B' 0)) (Seq (L 'A' 0) (L 'A' 0)))
+
+(A+AB) (BAA+A) (AC+C)
+
+> a = L 'A' 0
+> b = L 'B' 0
+> c = L 'C' 0
+
+> r4 = rAnnotate (Seq (Choice a (Seq a b)) (Seq (Choice (Seq b (Seq a a)) a) (Choice (Seq a c) c)))
+
+
+start [] (do { r' <- pderivM r4 'A' ; r'' <- pderivM r' 'B' ; r''' <- pderivM r'' 'A' ; pderivM r''' 'D' })
