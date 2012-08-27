@@ -1,0 +1,311 @@
+=begin title
+
+ReBug: A Regular Expression Debugger in Perl
+
+=end title
+
+=begin author
+
+Michel Lambert
+
+=end author
+
+=begin address
+
+Massachusetts Institute of Technology
+Cambridge, MA 02139
+
+=end address
+
+=begin contact
+
+mlambert@mit.edu
+
+=end contact
+
+=head1 Abstract
+
+Regular expressions, a mini-language unto their own, have lacked the tools normally associated with languages. This dearth of tools has lead to a general incomplete understanding of regular expressions, and a lacking utilization of some of their more powerful features. One tool that would go a long way in alleviating this situation is a regular expression debugger. This article describes the implementation of a full-featured regular expression debugger written in Perl, using the Perl runtime to provide the needed debugger features.
+
+=head1 Introduction
+
+Regular expressions are one of the most powerful tools in a Perl Programmer's tool set, right along with the incredible power of hashes and arrays. Unfortunately, regular expressions are also some of the most underutilized features of perl. Many people don't find this complex sub-language to be complex and non-intuitive compared to other more 'normal' languages. I believe that this lack of use of regular expressions stems from them not being treated as fully-fledged languages. One possible cause is that while other languages have debuggers, and sometimes even IDEs and other niceties, regular expressions never have such luxuries. Always content to be included in other languages and programs as a subset or an extra added feature, regular expressions have rarely been given the spotlight to shine on their own, and consequently have never received the attention to have debuggers and other tools develop around their usage.
+
+One could argue that regular expressions are too simple a language to need a debugger, but regular expressions have been growing in complexity ever since they were first created. In perl 5.6.0, we have tests, branching (whether it matches or not, move forward in the regex or backtrack), variable retention ($1, $2, and so on), full fledged Perl-in-a-regex with the (?{}) operator, and dynamically-interpolated regexes with (??{}). With the multitude of regular expression constructs, and the lack of an easy intuitive way to look at exactly what is going on inside a regex, it's rather hard to decipher why something may not be working.
+
+Even the wonderful virtues (laziness, impatience, and hubris) of Perl cannot help us here. The first virtue interferes with our ability to learn regular expressions. The second virtue means we want to use the regular expressions instead of spending the time to thoroughly understand them. The third virtue, hubris, is what keeps us from attempting to push the boundaries of our regex knowledge. The program might fail on unexpected regex to a regex we don't fully understand, and we wouldn't be able to have pride in our programs anymore. Okay, I'm stretching it, but I think you get the point. :) So instead of spending the time to more fully-understand regexes, we content ourselves with the "leftmost, longest" rules of thumb, and are prepared to recant voodoo spells over the regex as we try to get it to work. The ones among us, who haven't followed Perl's virtues religiously, might have spent their time reading Jeffrey Friedl's "Mastering Regular Expressions", and Mark-Jason Dominus's articles in The Perl Journal. These undoubtedly have a much better understanding of how regexes work, and are able to use this intuitive sense to more quickly create powerful regexes to do their bidding. But we don't want to 
+
+Introducing, the regular expression debugger, in 100% perl. This paper will discuss the current solutions to making regular expressions easy to use, the proposed regex debugger solution, including its origin and history, and then move on to explaining how the debugger works. First explaining some regex features you'll need to understand the code, the actual method in which the debugger debugs the regex will be thoroughly (but not tediously) explained. And finally, the current state of the code and possible ideas for future development will be discussed.
+
+=head2 Current Solutions
+
+I don't mean to say that regular expressions are a desert wasteland devoid of any map or oases to help you on your way. I just think that a camel would make your trip through the desert a lot quicker and easier. Currently, when a regex doesn't work, and you want to know why, there's a few ways to go about solving the problem. The first, and probably best solution is to go and read "Mastering Regular Expressions" and "The Perl Journal". This is obviously the best approach by far, since it gives you an intuitive understanding of regular expressions, which you can use to apply to all your regex construction and debugging needs. Of course, we can always complain that god made us humans require that annoying process known as sleep, and so we don't always have enough time to do the full research. Sometimes we just want quick answers.
+
+One can also use the perl debugger, and decipher the debug information returned for a regex. While this will help the gurus among us, I need something a little more concrete to work out why something isn't working. I<Why> doesn't it match this particular string? I<What> is it doing as it attempts the match? For these questions, only a true debugger will suit my needs.
+
+There are various regular expression engines in perl that implement a regular expression engine in perl. They attempt to emulate the behavior of Perl's regular expressions, and may introduce quirks, and not emulate all of Perl's quirks, in the process. However, adapting these modules to spit out debugging information as they matched a target string may suit your needs perfectly fine. In fact, it might allow you to get more information about the regex, since you are dealing with perl data structures that compose a regular expression, instead of a plain old string that gets passed to the perl internals.
+
+=head1 Proposed Solution
+
+The approach I took to create a regular expressions debugger was to utilize Perl to provide the debugging capabilities. However, I cannot take credit for this idea. When I attended the Perl Conference last year, I attended Mark-Jason Dominus's birds of a feather session, where he discussed his prototype work on a regex debugger. He initially prototyped the system in Perl, and was working on implementing a final version using XS and Perl. After talking with Mark about creating a front end for his debugger, I was given his early Perl prototype. From there, I expanded upon his simplistic proof of concept to provide support for full regular expression parsing and tokenizing. Our implementations have since diverged, with mine focusing on using perl code to both parse and tokenize the regex, while Mark-Jason Dominus is using Perl's regular expression parser to provide his hooks. Having never worked with the XS side of Perl, I will leave the pros and cons discussion of our different approaches to Mark's paper.
+
+The regular expression debugger is made possible through the addition of a single regex token, C<(?{})>. When the regular expression engine sees a token like C<(blah)>, it knows to match the contents inside the parenthesis and store it into $1. From the programmer's point of view, you cannot tell how many times the regex engine started storing a new value into $1. It could have backtracked to the left beyond the parenthesized expression, and attempted a new match elsewhere in the target string. The programmer only sees the final value of $1, while internally that expression could have been attempted many times. Previously, the only way to tell how many times would be to have an understanding of how a regular expression matches, and to walk through the regex match, including all of its missteps and backtracks. However, the C<(?{})> causes the regex engine to execute the string inside the brackets as Perl code, anytime that token is executed. For the official documentation on this, check out C<perldoc perlre>'s section on "(?{ code })".
+
+=head2 An Example of (?{})
+
+For example, in the following code snippet:
+
+    'abcabcd' =~ /abc*(?{
+      print "looking for 'd' after $`$&\n";
+    })d/
+
+Perl will attempt to match 'ab' followed by any number of 'c's, followed by this strange new token which will print out a status line, followed by a 'd'.
+
+When running the code, we see:
+    looking for 'd' after abc
+    looking for 'd' after ab
+    looking for 'd' after abcabc
+
+This shows how and when the regular expression attempts to match the final 'd' in the regex pattern. First it matches 'ab' and slurps in the 'c'. It prints out it's status message, and then fails to match the 'd'. The greedy C</c*/> token then backtracks to match zero 'c's, and it prints out the status message before failing again to match 'd'. Finally the regex engine backtracks to the beginning of the regex pattern, and attempts to match the next occurrence of 'a'. It then matches 'ab' and 'c', prints out the status message, and successfully matches the 'd'. So you can see how the perl code inside the C<(?{})> is executed every time that regex token is "executed" by the regex engine.
+
+This logging output provides a kind of debugging information, letting you see where and how the regex engine attempts to match it's final 'd'. If one extended this approach to put a C<(?{})> token between every single token in the regex, one could easily follow the progression of the regex engine's matching of the regex. This is the core idea of how the regular expression debugger works. The rest of the paper will discuss how the tokenizing and regex reconstruction part works, and how then explain how we actually use and retrieve information from our modified regex.
+
+=head2 Regex Optimizations
+
+You may be wondering why I used C</c*/> in the example above, since a plain old 'c' would have sufficed. However, now we see one of the problems of all debuggers (and Damian's Quantum::Superposition module as well): It's impossible to observe without (un)intentionally affecting what you are observing. For example, a compiled C program may exhibit some obscure bug that magically disappears when you compile it in debug mode. Because the debugger needs to match up the compiled code with the original source code, it cannot use various optimizations that would interfere with this process. By the same token (pun not intended), the Perl regular expression engine has numerous optimizations that it performs to speed up regexes.
+
+For example, using a regex of /abc+/ will cause the regex match to short-circuit if Perl cannot find "abc" in the target string at all. In this case, perl recognized that the C<(?{})> token could not affect the regex C</abc(?{..})d/>, and so it was equivalent, regex-matching-wise, to C</abcd/>. Perl immediately bypasses the first three characters of the target string "abcabcd" to start matching the regex with the correct final match. In order to make the example above demonstrate what I wanted, I needed to inhibit Perl's regex optimizations, and using 'c*' solved this.
+
+The process of tokenizing a regex can also interfere with optimizations. Perl can compile C</a*/> into a much quicker operation than it can C</(?:a(?{..}))*/>. By tokenizing the regex, we interfered with it's internal representation, and forced it to execute more slowly. Similarly, if there is a bug with Perl's regex engine, running your regex through the regex debugger could magically fix things for you as the regex engine uses the slow and steady method for matching your regex. While cases like these are very rare, it's worth noting nonetheless.
+
+
+=head1 How to Debuggerize (Tokenize and Reconstruct) the Regular Expression
+
+In every debugger, there is the concept of the token. You can step over these tokens, and inspect the state of the code after each one. With assembly code, that token is a single assembly instruction. With perl, it's a single line. (For the most part, although sub-expresssions within lines can obfuscate the issue.) With regular expressions, it's the smallest fundamental type that can be repeated and combined: a single character or character class. Some expressions, like ones that execute perl code C<(?{})>, also cannot be further broken down into sub-elements, and so must be treated as tokens. To create our debugger, we need to be notified after any token gets matched. To do this, we must insert callbacks in C<(?{})> from which we can query the state of the regular expression match. For example, we want a reconstructed version of C</abc*d/> to look roughly like:
+
+    qr/   (?{..})
+         a(?{..})
+         b(?{..})
+      (?:c(?{..}))*
+         d(?{..})
+      /x
+
+Of course, we would replace the C<..> with perl code to do something useful. We'll approach this in a few stages, each one conquering more difficult and complex regular expressions.
+
+=head2 Matching Parenthesized Regular Expressions
+
+If we want to match a regular expression, we need a way to match parenthesized expressions. We'll need to deal with nested parenthesis of an arbitrary depth. Unfortunately, nested parenthesis cannot be matched with regular plain-vanilla regular expressions. In order to match nested, balanced parenthesis, we need to make use of a little-known Perl-specific regular expression operator that's not even listed in the documentation. While it was at some point, it was listed as experimental and not to be relied upon. Well, I'm relying on it, and it seems to work fine for me. If it does break in the future, I suppose it can be replaced with a more manual approach that uses lots of perl code to match parenthesis. This operator is C<(??{})>, and operates very much like eval-string, or C<eval "some perl code here">. The regex engine does not interpolate the contents of C<(??{})> as a regular expression unless it actually executes that token. Inserting a plain string like in C<(??{"/d"})> is rather useless, but the power comes in when you use scalar variables. While there are a lot of very interesting ideas for combining C<(?{})> and C<(??{})>, we're going to use a recursive sort of approach to match nested parenthesis. First, we'll start with the hard approach:
+
+Let's start with a regular expression to match a depth-one parenthesized expression. A simple modification of the regex used to match brackets will work very well:
+
+    qr/ \(
+          (?: \\.
+            | [^()]
+          )+
+        \)
+      /x
+
+Now, we want to extend this to match depth-two parenthesized expressions. What we need to do is in addition to the character class and escaped character sub-regexes, we need to allow for a sub-parenthesized expression. The resulting regex looks like:
+
+    qr/ \(
+          (?: \\.
+            | \(
+                (?: \\.
+                  | [^()]
+                )+
+              \)
+            | [^()]
+          )+
+        \)
+      /x
+
+Note how the second part to the inside parenthesis is now identical to the depth-one regular expression. Had we defined the first regex as C<$depthone_regex>, we can more simply write this as:
+
+    qr/ \(
+          (?: \\.
+            | [^()]
+            | $depthone_regex
+          )+
+        \)
+      /x
+
+To do a depth-three matching regex, we would simply need to include the depth-two regex in the same place that we included the depth-one regex in the regex above. What we now see is that we have a pattern of recursiveness. The problem is that in order to write an infinite-level matching regex, one would need to include an infinite number of sub-regexes. One approach is to use C<$sub_expresssions = tr/(/(/> to count the number of parenthesis, and then to dynamically construct a regex to match a C<$sub_expresssions>-depth parenthesized expression. While that would work, we can get the solution much more simply using our new friend C<(??{})>.
+
+Because Perl interprets the code inside C<(??{..})> at runtime, we can reference currently-undefined and un-declared variables. (I believe the code inside (??{}) and (?{}) runs in the scope of its caller, not in the scope of its definition.) So with a few I<minor> modifications to the depth-two regex, we end up with:
+
+
+    $parenthetized_expression_r = 
+    qr/ \(
+        (?: \\.
+          | [^()]
+          | (??{ $parenthetized_expression_r })
+        )+
+      \)
+    /x
+
+This code will now dynamically interpolate a regex to match another level of parenthesis if, and only if it is needed. This regular expression now dynamically grows at runtime to fit the exact depth of the regular expression. Also, note that the normal cases of a non-parenthesis character, it will never execute the (??{}) expression, and so will never interpolate C<$parenthetized_expression_r> into the current regex.
+
+=head2 Matching a Regular Expression with Regular Expressions
+
+Our examples will rely upon two variables, C<$token_r> and C<$quantifier_r>, which will be used to parse out the parts of a regex. While we could have gone the traditional route and defined a formal grammar and used Parse::RecDescent, I thought it would be overkill for regular expression. Besides, we could use regular expressions to match and morph regular expressions. Oh, the wonderful irony of it all. After having gone as far as I have in handling the various strange cases, perhaps it may have been better to use a formal grammar and just hook in our Debuggerize logic.
+
+But since my debugger uses regexes to parse regexes, so that's what we'll be discussing here. Much of the logic could easily be applied to a formal grammar anyway, so all is not lost. Just be forewarned that the following discussion assumes a competent level of regular expression knowledge. Let's start with the simpler one, the quantifier, first. This quantifies how many of the token you want. The most common examples are C<+>, C<?>, and C<*>, which a simple character C<[*+?]> class can handle. Let's not forget the under-used {n,m} notation, as well. From the docs, we see that you can use any of: C<{n}>, C<{n,}>, and C<{n,m}>. A regex to match these would be, C<\{\d+(?:,\d*)?\}>, which allows for all three cases. So far we now have: C<(?:\{\d+(?:,\d*)?\}|[*+?]?)>. And finally, we have to be sure to handle their non-greedy counterparts, which simply consists of an optional C<?> at the end of the various types discussed above. So our final definition for C<$quantifier_r> is:
+
+    $quantifier_r = 
+    qr{ (?:  \{\d+(?:,\d*)?\} #handle {n} {n,} {n,m} forms
+           | [*+?]?           #handle * + ? forms and the non-quantifier form
+        )\??                  #optionally non-greedy
+      }x;
+
+Moving on to C<$token_r>, we find that there are numerous kinds of tokens available to us. First there are the special characters: C<.>, C<\d>, C<\S>, etc. Other tokens include plain old characters: C<a>, C<d>, C<.>, etc. In addition, we have to allow for bracketed character classes: C<[A-Z]>, C<[\[\]]>, etc. And finally, we have to allow for parenthesized expressions, which we've already done in the previous section, which could have nested parenthesis. The first two cases are easily handled with: C</\\.|./>.
+
+The third case may look easy at first glance, with [[^\]]*] coming to mind. But notice how we should be handling escaped closing brackets within brackets. This problem is very similar to the problem of matching a string like C<"\"">, which has escaped quotes within a quoted string. The solution to the string problem was the regex: C<\"(?:\\.|[^\"])*\"> . A simple modification results in the regex we need: C<\[(?:\\.|[^\]])+\]> . Breaking this down, we see that it first matches the opening bracket. Before attempting to slurp in regular characters, it checks for a backslash and then slurps in the following character. This causes that any escaped characters to be hidden in the C<.> that follows, and keeps them from being interpreted. This ensures that C<\]> will gets matched as bracketed contents, while C<]> will get matched as the end of the bracketed character class.
+
+And so with all four parts of the puzzle, we are now able to define C<$token_r>.
+
+    $token_r = qr{ \\.                         #an escaped character
+                 | [^[\]()*?+]                 #a character
+                 | \[(?:\\.|[^\]])+\]          #a character class
+                 | $parenthetized_expression_r #some parenthesized group
+                 }x;
+
+
+=head2 Debuggerizing a Regex
+
+Now that we've defined exactly what a token and a quantifier is, we can make the assumption that a regular expression consists of a series of linear tokens, which we want to debuggerize. We can write this as: C<s/($token_r)($quantifier_r)/(?:$1(?{..}))$2/g>. This looks for a token followed by a quantifier, and puts the token and it's associated perl callback into a non-capturing parenthesis, quantified appropriately. Running this regex against our original regex, C</abc*d/> will produce C</(?:a(?{..}))(?:b(?{..}))(?:c(?{..}))*(?:d(?{..}))/>. As you can see, the process of debuggerizing a debugging regex can easily turn simple ordinary regexes into ones that haunt your dreams. While this is unavoidable due to the symbol-heavy constructs we're using, it will eventually be hidden from view through our debugger front-end.
+
+Unfortunately, the substitution used above will treat any parenthesized expression as a single token, regardless of whether there were additional tokens within the parenthesis. To get this to work, one must extend the substitution operator to parse sub-tokens appropriately.
+
+    sub debuggerize {
+      my $string = shift;
+      $string =~ s{
+        ($token_r)
+        ($quantifier_r)
+      }{
+        my ($token, $quantifier) = ($1, $2);
+        my $should_be_evaluated = ..;
+        my $parenthesis_descriptor = ..;
+        my $token_contents = ..;
+        $token = "(".$parenthesis_descriptor.debuggerize($token_contents).")" if ($should_be_subevaluated);
+        "(?:$token(?{..}))$quantifier";
+      }egx;
+      return $string;
+    }
+
+Now we just need to define $should_be_subevaluated. Not all sub-expressions should be evaluated. C<(?#)>, C<(?{})>, and C<(??{})> should not. It will probably be easier to define what should be evaluated, instead of what shouldn't. This will allow new regular expressions constructs to be treated as whole tokens instead of being misinterpreted as token-able when they should not be. To save you from boredom, I'll simply list the various types that need to be 
+sub-evaluated, and then show you the regex that matches them. C<(?:..) (?=..) (?E<gt>..) (?E<lt>=..) (?E<lt>!..) ([^?]..)>, where the last type covers any parenthesized expression that does not being with a question mark. So using this information, we should be able to define a regular expression that determines whether or not the parenthesized expression needs debuggerizing.
+
+
+    my $regex_parenthesis_r =
+    qr{ \?(?:[=!>]|<[=!])
+      | \?[imsx]*(?:\-[imsx]*)?:
+      | (?=[^?])
+    }x;
+
+    my $should_be_subevaluated = ($token =~ /\($regex_parentheseis_r/);
+    ...
+
+Phew. We're almost there. One question remains: What is put I<inside> the C<(?{})> operator? To simplify matters, we will just say it calls a function named C<handle_request>. We will leave the actual contents of this function to a later section, where we discuss how we extract information from the regex as it matches. This will work because the C<handle_request> function has access to the various C<$`>, C<$&>, C<$'>, C<$1>, C<$2>, etc variables, and so is capable of extracting any and all the information we need from the regex. So our final debuggerizing token of C<(?{handle_request()})> should suffice for now, although we will need to pass parameters, when we find out what we actually need to do with C<handle_request()>, in the next few sections. These parameters will consist of information that is only available at the time of debuggerizing, and is unavailable when the regex is in the midst of executing matching a string. For example, we'll need to know what regex token we are currently executing, and how far through the regex the current match is (the equivalent of C<pos()>, but for the regular expression).
+
+And so, there you have it: How to debuggerize a regular expression. While there are changes between the version described here and the version in actual use, the approach described above is perfectly valid and will work. I needed to make additional changes to support additional debugger features, some of which required somwhat radical changes to the code.
+
+=head1 Writing the Debugger Itself
+
+=head2 The Debugger's Proposed Features
+
+Now that we have our debuggerized regular expression, we are able to concentrate on extracting useful information from the calls to C<handle_request()>. To figure out what we want C<handle_request()> to do, we need to figure out what features we want our debugger to have. Let's outline how we want the debugger to work. We want the ability to set breakpoints, to stop the regex when we meet certain conditions. And we want to write our breakpoint conditions in Perl, of course. Same with the ability to monitor certain variables and see how they change over the course of the regular expression match. We want to be able to monitor any Perl expression, so we can watch not just the value $1 as returned by our regular expression, but the output of a regex match performed I<against> $1, as in C<$1 =~ /(\w+)/>. And we want this all to work without destroying the special C<$`>, C<$&>, C<$'>, C<$1>, C<$2>, etc variables that we get from our debuggerized regex match. It's almost as if we need two perl interpreter environments to handle this. But let's not get into that just yet. :)
+
+In light of ActiveState's visual regex debugger they are including in their Perl IDE, it would be nice to have a GUI interface to the regex debugger. Tk, inherently portable, should work fine. But we shouldn't neglect a commandline interface for the folks that have access to Perl only through a shell. Luckily, once we get the debugger up and running, the difficulty of different interfaces will be in coding the actual interface.
+
+Another thing we would like is the ability to walk backwards in time. Stepping forward and continuing forward are nice and dandy, but what about the situations where your breakpoint was one step too far, and you wish you could just step backwards to the place you want. With a traditional debugger, it's impossible to store the state of the code after each step, due to the large amount of memory that would have to be stored for I<each> step of the code. Luckily, we're dealing with regular expressions, and so the amount of state information that needs to be saved at each step is rather small. We have the special variables, the capturing C<$1> variables, and that's pretty much it. So we can simply store these states into an array, and we can step through the array both forwards and backwards. Now you can go brag about Perl's ability to reverse Hawking's Arrow of Time. I bet even Python can't do that. :)
+
+While on subject of strange time contortions, we should deal with the concept of forever as well. We can define forever as the concept of an infinite amount of time. Unfortunately, some regexes are able to exhibit this concept of "forever". When run against certain strings, these regexes never seem to complete. There are two explanations that we can put forth to explain this phenomenon. Either the regular expressions travel at the speed of light, and so experience a time dilation effect, which we stationary observers see as the regex's rate of time slowing down. The other explanation is that the regex takes an infinite (or at least an excessively large finite) amount of time to complete due to their internal workings. While the former explanation might explain why computers get slower over time, our regular expression debugger should be crash-proof despite the strange workings of the universe. This means that running the regex and storing each state into an array, as we would have originally planned, cannot work, since we cannot rely on the regex actually coming to completion. The stability of our debugger should not be dependant upon the stability of the regex being fed in.
+
+It would be nice if we could just pause in each callback we get from the C<(?{})> tokens, and wait to see if the user wants additional regex-debug-states. This would allow us to only parse as much of the regex as we need in order to fulfill the user's requests. As the user hits "Step", the C<(?{})> token returns control to the regular expression until the next C<(?{})> token appears, at which point we extract information about the regex at that point in it's matching history. Perl can store in an array the regex states that have already been processed, and use them whenever the user travels backwards through the regex match. And as the user presses forward into new territory, it can push the new states onto the array.
+
+While this approach does have it's nice benefits, there is one problem. If the perl callback waits to see if the user wants an additional regex token, then these delays will prevent the regex from running to completion. While this is what we want, in the interesting of preventing non-terminating regexes from hosing the system, it also prevents Perl from doing anything else besides that regex. With Perl/Tk's MainLoop, and an equivalent main loop for a commandline interface, there is the age-old problem of two entities vying for control over the program.
+
+=head2 Solving our Problems with Silverware
+
+To solve the problem of two places needing control over perl, we can take history's example and simply split the world into two nations, with two different areas of control. Remember the mention of two perl interpreters? Following that approach leads to a solution to both the non-interfering C<$&> variables, and to a regex debugger that can withstand non-terminating regular expressions. While you can achieve great things by realizing there is no spoon, you can achieve the same by realizing that there is a C<fork()>.
+
+Through a simple C<fork()>, we are able to create two processes. And through careful manipulation of filehandles, we are able to keep these two processes connected through some IPC (Interprocess Communication). This allows us to send our regex to the back-end for debuggerizing and testing. We can then query the regex for any new states we need, or leave it hanging when we the user is traversing the historical record of the regex match. With the recent versions of ActiveState perl supporting C<fork()>, reliance on this traditionally-UNIX command doesn't seem so bad. Of course, reliance on this traditionally anti-UNIX OS could be bad.
+
+As for the implementation details, I'll restrict this paper to the discussion of the approaches rather than the details, since they do not related directly to the regular expressions or debugging, but are merely obstacles that had to be overcome to allow for regular expression debugging. You are invited to check out the source (URL at the end of the article) to the debugger if you are interested. we simply fork() the program at the start, making sure we leave have two pipes in each forked program, one for input, one for output. With the C<pipe> command, and four filehandles, we can easily give each forked copy two filehandles that fit our needs.
+
+Then, you set up an IPC communication interface, allowing the interface to send new regexes, target strings, and 'nexttoken' commands to the debugger back-end, with the debugger returning information on the next token-state to the interface side, for display. The information return consists of the oft-repeated variables, C<$`>, C<$&>, C<$'>, C<$1>, C<$2>, and C<pos()>. We store this in a hash, with keywords of C<`>, C<&>, C<'>, C<1>, C<2>, C<pos>, for reasons that will become apparent when we discuss breakpoints and variable watches.
+
+=head2 The Interface
+
+The interface is rather simple. (Prepare for self-plugging mode.) There are textboxes for the regex and it's optional flags, along with two textboxes that allow you to choose whether to use a string, or a filename from which to use text data, to match the regular expression against. In addition, you can specify which regex flags you want. A future plan is to allow for one to debug substitution matches in addition to regular pattern matches. The standard C<ismx> flags are supported. There is also an array of buttons along the bottom, which are used for rewind-to-beginning, play-backwards, step-backwards, step-forwards, play-forwards, and fast-forward-to-end, and pause. Since the regex debugger interface inserts a slight pause between each successive token when in play mode, this lets the user see the regex traverse through the string, and perform all it's backtracking. It's very enlightening to see all the false attempts a regex might make, and there's some sort of beauty in being able to visually see a regex as it matches, instead of getting a simple true or false value. This interface also allows for the functionality of a pause button to interrupt the regex match at any point, equivalent to a manual breakpoint. Breakpoints and variable watches are set via additional windows, and operate as they would in any debugger.
+
+=head2 The Implementation
+
+Breakpoints are stored as an array of perl strings, as set by the GUI, filled with strings like C<$& eq "abc">. To complete our breakpoint implementation, we need to simply load a new state into memory, and C<eval> all the breakpoint strings to see if any of them return true. Unfortunately, should you try and set C<$&>, you'll run into a nasty "Modification of a read-only value attempted at" error. And so, we store the variables in a hash, keyed by their name, as mentioned earlier. We can store arrays of these hashes, to record our history of the regex match. And finally, we simply convert strings like C<$& eq "abc"> to C<$state-E<gt>{'&'} eq "abc">, with C<s/\$(['`&\d]+)/\$state-E<gt>{'$1'}/g>, and we have a fully working breakpoint implementation. The same approach is used to evaluate the variable watches and let us watch any Perl expression like C<$&> over the course of the regex match.
+
+So it works like this: We get the current token, either through querying the debugging back-end, or by pulling one off our already-traversed array. We run through the variable watches to evaluate them in light of the current regex state, and display them to the user. If we are currently playing (as opposed to stepping), we run through our breakpoint array and check to see if any of the strings C<eval> to true, in which case we stop running, and wait for further action. Otherwise we sleep for a small period of time to give the GUI time to update, and continue running. 
+
+And finally, our last few pieces to the puzzle: the display on information. We color-code our regular expressions to show the progress of the match. Green indicates a successful match, and blue indicates an in-progress match. Likewise, it would be very helpful to see how far through the regex you are. There is no equivalent to C<pos()> for the regex itself. So we must go back to our debuggerizing process, and include, in the call to C<handle_request()>, the amount of the current regex that has matched thus far along with the current regex token that's being matched. For example, if we used the regex C</a*b/>, the call to handle_request just before the C<b> token, would be:
+
+    (?{handle_request(
+                             status => 'pause',
+                             current_token => 'b',
+                             regex_matched => 'a*b',
+                     )})
+
+When this information is then passed along to the regex debugger interface, we can display our current regex token that is attempting a match, and display our progress through the regex itself, so the user isn't left to guess at the regex's position from the currently matched portion of the string. With all of the pieces of the regular expression debugger interface completed, we now have finished the regex debugger engine. While I completed a Tk interface first, I should hopefully have a commandline version ready for the conference.
+
+=head1 Conclusion
+
+There you have it. The basics, the interesting parts, and even some uninteresting parts, of the regular expression debugger engine. Hopefully you've found this foray into the underground world of regular expressions to be both interesting and informative. In a nutshell, the regex debugger takes a regex, tokenizes it into tiny tokens, inserts C<(?{})> between them to give us to give us callbacks at every step, then joins them all together to create a new debuggerized regex. The debugger then extracts regex state information with each callback, and allows the user to travel both forwards and backwards through the regex using the interface provided. As one person put it, I "essentially transform input regexes, using regexes, into morphed regexes with hooks for the interface." Simple, right? :)
+
+=head2 Current Code
+
+You've patiently read my description of how things work, and you want to try it out? Or you impatiently jumped to the end of the article to find the link? The site can be found at http://perl.jall.org/rebug/.
+
+=head2 Future Directions
+
+What's next?
+
+=over 4
+
+=item 1.
+
+ReBug currently works on all the regexes I've thrown at it, although there are undoubtedly strange incantations that will utterly confuse it. Hopefully those kind of bugs will make themselves apparent with use.
+
+=item 2.
+
+ReBug for Substitutions. Possibly called, s/Re/Bug/, although that has undesirable connotations. Perhaps something plain like SubReBug.
+
+=item 3.
+
+A more graphical interface, that breaks down the regex into the tokens and shows how it will attempt to match next. There are numerous modules that parse and break down a regex into it's individual components, which could be used to provide a graphical representation of the regular expression.
+
+=item 4
+
+Implement whatever ideas I get from the audience when presenting this paper at The Perl Conference 5.0.
+
+=back
+
+
+=head1 References
+
+=over 4
+
+=item 1.
+
+Christianson, Tom. "perlre - Perl regular expressions". I<perldoc perlre>
+
+=item 2.
+
+Dominus, Mark-Jason. "Last Year's BOF Session at TPC4".
+
+=item 3.
+
+Friedl, Jeffrey E. E. I<Mastering Regular Expressions>.
+
+=item 4.
+
+Wall, Larry, et. al. I<Programming Perl, Third Edition>.
+
+=back

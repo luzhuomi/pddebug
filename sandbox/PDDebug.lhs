@@ -242,7 +242,9 @@ the monadic version is exactly the same as the pderivT modulo nubbing, which is 
 > newtype PDMonad t e a = PDMonad { runPDM :: t -> ([(a,t)],[e]) } -- ^ t captures the trace of src location, e denote the errors
  
 > instance Monad (PDMonad t e) where
+>    -- return :: a -> PDMonad t e a
 >    return a        = PDMonad (\h -> ([(a,h)],[]))
+>    -- >>= :: PDMonad t e a -> (a -> PDMonad t e b) -> PDMonad t e b
 >    (PDMonad x) >>= f = PDMonad (\h -> let (succ'ed,failed) = x h
 >                                           (ahs, failed') = unzip [ runPDM (f a) h' | (a,h') <- succ'ed ] 
 >                                       in (concat ahs, failed ++ (concat failed')))
