@@ -10,8 +10,8 @@ includes now ordering on environment
 
 > module Main where
 
-> import Monad
-> import List 
+> import Control.Monad
+> import Data.List 
 > import Data.Bits
 > import Data.Char (ord)
 > import GHC.IO
@@ -328,8 +328,18 @@ start [] (do { r1' <- pderivM r1 'A' ; r1'' <- pderivM r1' 'A' ; pderivM r1'' 'A
 > a = L 'A' 0
 > b = L 'B' 0
 > c = L 'C' 0
+> d = L 'D' 0
 
 > r4 = rAnnotate (Seq (Choice a (Seq a b)) (Seq (Choice (Seq b (Seq a a)) a) (Choice (Seq a c) c)))
 
 
 start [] (do { r' <- pderivM r4 'A' ; r'' <- pderivM r' 'B' ; r''' <- pderivM r'' 'A' ; pderivM r''' 'D' })
+
+start [] (do { matchM r4 "ABAD"}) 
+
+
+rebug example
+
+> rebug = rAnnotate (Seq a (Seq b (Seq (Star c) d)))
+
+start [] (matchM rebug "ABCABCD")
