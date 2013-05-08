@@ -72,22 +72,35 @@ to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that 
 \gamma ::= { (i, r) , ... , }
 i ::= 1,2,3,...
 
-> newtype Req i = Req [(i, RE)]
+> newtype UReq i = UReq [(Int, RE)]
 
-> lookupReq :: Eq i => i -> Req i -> Maybe RE
-> lookupReq i (Req env) = lookup i env
+> lookupReq :: Int -> UReq -> Maybe RE
+> lookupReq i (UReq env) = lookup i env
 
  * The Regular expression 
              
-r ::= ()^i || (r|r)^i || (rr)^i || (r*)^i || l^i || \phi^i 
+p ::= r^i 
+r ::= () || (p|p) || pp || p* || l || \phi 
                           
-                          
+> data Pat = Pat RE Int
+
+> data RE where
+>  Empty  :: RE  
+>  Choice :: Pat -> Pat -> RE
+>  Seq    :: Pat -> Pat -> RE
+>  Star   :: Pat -> RE
+>  L      :: Letter -> RE 
+>  Phi    :: RE 
+
+
+
+
 
 === The Replacement Relation ===
 We use the following judgement to denote the replacement relation
-$$ \gamma, r \turns d : t $$ 
-where $\gamma$ is the user requirement, $r$ is the existing regular expression, $d$ is the input document and $t$ is the replacement regular expression.
-It reads, under user requirement $\gamma$, $r$ can be replaced by $t$ which accepts $d$. 
+$$ \gamma, p \turns d : q $$ 
+where $\gamma$ is the user requirement, $p$ is the existing regular expression, $d$ is the input document and $q$ is the replacement regular expression.
+It reads, under user requirement $\gamma$, $p$ can be replaced by $q$ which accepts $d$. 
 
 There are two properties follows 
 
@@ -97,14 +110,132 @@ There are two properties follows
 The first property ensures that the replacement is subsuming the orginal regex $r$ if $d$ is already in $r$ and the matching result is conforming to the user requirement.
 The second property ensures that if $d$ is not in $r$, the replacement shall have the same requirement-shape as the orginal one and conform to the user requirement. 
 
+
+  i \in dom(\gamma) 
+  d \in \gamma(i) 
+  \gamma - {i}, r \vdash d, r'                           
+ ----------------------------- (pExist)
+  \gamma, r^i \vdash d : r'^i
+ 
+
+   i \not \in dom(\gamma)
+   \gamma - {i}, r \vdash d : r'
+ ------------------------------- (pIgnore)
+ \gamma, r^i \vdash d : r'^i
+
+
    d \in r
--------------------------
-\emptyset, r \vdash d : r
+ ------------------------- (rEmp)
+ \gamma, () \vdash d : r
 
-   d \not \in r   d \in r'
--------------------------
-\emptyset, r \vdash d : r'
+   d \in r 
+ ------------------------- (rLab)
+ \gamma, l \vdash d : r
 
 
-----------------------------------------------
- {(i,t)} U \gamma, r^i \vdash 
+
+  fv(r1) = \bar{i1} fv(r2 = \bar{i2} 
+ \gamma_{\bar{i1}}, r1 \vdash d1 : r1'                              
+ \gamma_{\bar{i2}}, r2 \vdash d2 : r2'                         
+ ------------------------------------- (rSeq)
+ \gamma, r1r2 \vdash d1d2 : r1'r2'
+
+ we use \gamma_{\bar{i}} to denote { (i,\gamma(i)) | i \in \bar{i} and i \in dom(\gamma) }
+                          
+                          
+  \gamma, r1 \vdash d : r1'
+ -------------------------------------- ( rOr1)   
+ \gamma, r1|r2 \vdash d : r1'|r2                          
+
+
+  \gamma, r2 \vdash d : r2'
+ -------------------------------------- ( rOr2)   
+ \gamma, r1|r2 \vdash d : r1|r2'                          
+
+
+  \gamma, r \vdash di : r'  \forall i \in \{1,n\}
+ ------------------------------------------------- ( rStar)   
+ \gamma, r* \vdash d1...dn : r'*                          
+
+
+Rules rSeq, rOr1, rOr2 and rStar validate the replacement relation indeterministically
+
+
+
+  \gamma,p \vdash d:p'    \forall d\in D 
+ ---------------------------------------- (pDocS)
+  \gamma p \vdash D : p'
+
+
+> replacement :: UReq -> Pat -> Doc -> Pat -> Bool 
+> replacement ureq (P r i) d (P r' i') | i == i' 
+
+
+
+
+
+=== The Refinement Algorithm ===
+
+We use the judgement 
+$$\gamma,p \models d : q $$ 
+to denote the refinement algorithm. 
+
+The algorithm correctness property (Soundness)
+
+Let $\gamma$ be the user requirement, $p$ denote the initial regular expression pattern, $d$ denote the input document
+$\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
+
+  () \in p 
+ -------------------------------------- (Emp1)
+ \gamma p \models () : p
+
+
+  () \not \in p 
+ -------------------------------------- (Emp2)
+ \gamma p \models () : p|()
+
+
+
+  r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn)
+  \gamma /l^x = \gamma' 
+  \gamma', pj \models d : pj'
+  (l1^x,p1)|...| (l^x,pi')|...|(ln^x,pn) \denorm r'^x
+ ----------------------------------------------- (Norm1)
+ \gamma r^x \models ld : r'^x
+
+
+  p \norm (l1^x,p1)|...|(ln^x,pn)
+  \not \exists i \in \{1,n\} l_i = l
+  ld \in \gamma(x)
+ ----------------------------------------------- (Norm2)
+ \gamma r^x \models ld : (r|ld)^x
+
+
+
+
+==== $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ ====
+
+
+norm r = if () \in r then (norm' r) | ()  else (norm' r)
+
+norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
+                          
+denorm (\bar{m}|()) = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}                           
+                      in [ (mkStar plus) | plus <- pluses ] ++ nonpluses
+                          
+denorm \bar{m} = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}
+                 in [ (mkPlus plus) | plus <- pluses ]  ++ nonpluses
+                          
+denorm' \bar{m} = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
+
+isPlusMonomial (l,p) = l \in (choiceToList p)
+
+mkStar ms = let fs = map fst ms  
+                (Star r) = snd (head ms)
+            in if (sort fs) == (sort (choiceToList r)) then (Star r) else ms
+
+mkPlus ms = let fs = map fst ms  
+                (Star r) = snd (head ms)
+            in if (sort fs) == (sort (choiceToList r)) then (r, (Star r)) else ms
+                          
+
