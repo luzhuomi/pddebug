@@ -111,11 +111,15 @@ The first property ensures that the replacement is subsuming the orginal regex $
 The second property ensures that if $d$ is not in $r$, the replacement shall have the same requirement-shape as the orginal one and conform to the user requirement. 
 
 
+> replacement :: UReq -> Pat -> Doc -> Pat -> Bool 
+
   i \in dom(\gamma) 
   d \in \gamma(i) 
   \gamma - {i}, r \vdash d, r'                           
  ----------------------------- (pExist)
   \gamma, r^i \vdash d : r'^i
+
+> replacement ureq (P r i) d (P r' i') = undefined       
  
 
    i \not \in dom(\gamma)
@@ -166,9 +170,6 @@ Rules rSeq, rOr1, rOr2 and rStar validate the replacement relation indeterminist
  ---------------------------------------- (pDocS)
   \gamma p \vdash D : p'
 
-
-> replacement :: UReq -> Pat -> Doc -> Pat -> Bool 
-> replacement ureq (P r i) d (P r' i') | i == i' 
 
 
 
