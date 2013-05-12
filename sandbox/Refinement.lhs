@@ -1,4 +1,4 @@
-
+> {-# LANGUAGE GADTs #-}
 
 The regular expression refinement algorithm
 
@@ -60,6 +60,8 @@ Refer to the PDDebug.lhs
 
 > module Main where
 
+> import qualified Data.Map as M
+
 === The problem === 
 
 Let  $\gamma$ denote the user specification, $d$ denote the input document , $r$ the pattern and  $r'$ the refined pattern, 
@@ -72,10 +74,13 @@ to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that 
 \gamma ::= { (i, r) , ... , }
 i ::= 1,2,3,...
 
-> newtype UReq i = UReq [(Int, RE)]
+> type UReq = [(Int, RE)]
 
-> lookupReq :: Int -> UReq -> Maybe RE
-> lookupReq i (UReq env) = lookup i env
+> lookupUR :: Int -> UReq -> Maybe RE
+> lookupUR i env = lookup i env
+
+> updateUR :: Int -> RE -> UReq -> UReq
+> updateUR = undefined -- todo
 
  * The Regular expression 
              
@@ -89,10 +94,51 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >  Choice :: Pat -> Pat -> RE
 >  Seq    :: Pat -> Pat -> RE
 >  Star   :: Pat -> RE
->  L      :: Letter -> RE 
+>  L      :: Char -> RE 
 >  Phi    :: RE 
 
+> class PosEmpty t where
+>   posEmpty :: t -> Bool
 
+> instance PosEmpty Pat where
+>   posEmpty (Pat r _) = posEmpty r
+
+> instance PosEmpty RE where
+>   posEmpty Empty          = True
+>   posEmpty (Choice p1 p2) = posEmpty p1 || posEmpty p2
+>   posEmpty (Seq p1 p2)    = posEmpty p1 && posEmpty p2
+>   posEmpty (Star _)       = True
+>   posEmpty (L _ )         = False
+>   posEmpty Phi            = False
+
+
+> class Deriv t where
+>   deriv :: t -> Char -> t
+
+> instance Deriv Pat where
+>   deriv (Pat r i) l = Pat (deriv r l) i
+
+> instance Deriv RE where
+>   deriv Empty _ = Phi
+>   deriv (Choice p1 p2) l = Choice (deriv p1 l) (deriv p2 l)
+>   deriv (Seq p1 p2) l | posEmpty p1 = Choice (Seq (deriv p1 l) p2) (deriv p2 l)
+>                       | otherwise = Seq (deriv p1 l) p2
+>   deriv (Star p) l = Seq (deriv p l) (Star p)
+>   deriv (L c) l | c == l = Empty
+>                 | otherwise = Phi
+>   deriv Phi _ = Phi
+
+
+> class Accept t where
+>   accept :: t -> Doc -> Bool
+
+> instance Accept Pat where
+>   accept (Pat r i) d = accept r d
+
+> instance Accept RE where
+>   accept r ls = posEmpty $ foldl (\r l -> deriv r l) r ls 
+
+> type Doc = [Char]
 
 
 
@@ -119,8 +165,8 @@ The second property ensures that if $d$ is not in $r$, the replacement shall hav
  ----------------------------- (pExist)
   \gamma, r^i \vdash d : r'^i
 
-> replacement ureq (P r i) d (P r' i') = undefined       
- 
+> replacement ureq (Pat r i) d (Pat r' i') = undefined       
+
 
    i \not \in dom(\gamma)
    \gamma - {i}, r \vdash d : r'
@@ -186,30 +232,84 @@ The algorithm correctness property (Soundness)
 Let $\gamma$ be the user requirement, $p$ denote the initial regular expression pattern, $d$ denote the input document
 $\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
 
-  () \in p 
+
+> refine :: UReq -> Pat -> Doc -> Maybe Pat -- a Maybe monad is required in case of \gamma / l^x failure
+
+  () \in r 
  -------------------------------------- (Emp1)
- \gamma p \models () : p
+ \gamma r^x \models () : r^x
 
 
-  () \not \in p 
+  () \not \in r 
  -------------------------------------- (Emp2)
- \gamma p \models () : p|()
+ \gamma r^x \models () : (r^x|()^x)^x
 
-
+> refine ureq p@(Pat r x) [] | posEmpty r = return p
+>                            | otherwise  = return (Pat (Choice p (Pat Empty x)) x)
 
   r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn)
-  \gamma /l^x = \gamma' 
-  \gamma', pj \models d : pj'
+  t/l^x = t'
+  \{x : t'\} \cup \gamma, pi \models d : pi'
   (l1^x,p1)|...| (l^x,pi')|...|(ln^x,pn) \denorm r'^x
  ----------------------------------------------- (Norm1)
- \gamma r^x \models ld : r'^x
-
-
-  p \norm (l1^x,p1)|...|(ln^x,pn)
+ \{x : t\} \cup \gamma, r^x \models ld : r'^x
+                                            
+                                            
+  r^x \norm (l1^x,p1)|...|(ln^x,pn)
   \not \exists i \in \{1,n\} l_i = l
-  ld \in \gamma(x)
- ----------------------------------------------- (Norm2)
- \gamma r^x \models ld : (r|ld)^x
+  ld \in t
+  (l1^x,p1)|...|(ln^x,pn)|(l^x,d^x) \denorm r'^x                           
+  ----------------------------------------------- (Norm2)
+  \{x : t\} \cup \gamma, r^x \models ld : r'^x
+
+
+ x \not \in dom(\gamma)
+ r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn)
+ \gamma, pi \models d : pi'                                    
+  (l1^x,p1)|...| (l^x,pi')|...|(ln^x,pn) \denorm r'^x                              
+ ----------------------------------------------- (Norm3)
+ \gamma, r^x \models ld : r'^x
+ 
+
+  x \not \in dom(\gamma)
+  r^x \norm (l1^x,p1)|...|(ln^x,pn)
+  \not \exists i \in \{1,n\} l_i = l  
+  (l1^x,p1)|...|(ln^x,pn)|(l^x,d^x) \denorm r'^x                         
+  ----------------------------------------------- (Norm4)
+  \gamma, r^x \models ld : r'^x
+
+
+> refine ureq p@(Pat r x) (l:d) = 
+>   case lookupUR x ureq of 
+>   { Just t -> let t' = deriv t l
+>                   ms = norm p
+>               in case lookupMN l ms of 
+>                  { Just pi -> do 
+>                     { let ureq' = updateUR x t' ureq
+>                     ; pi' <- refine ureq' pi d
+>                     ; let ms' = updateMN l pi' ms 
+>                     ; return (denorm ms')
+>                     }
+>                  ; Nothing 
+>                     | t' `accept` d  -> do 
+>                     { let ms' = insertMN l (mkPat x d) ms
+>                     ; return (denorm ms')
+>                     }
+>                     | otherwise -> [] 
+>                  }
+>  ; Nothing -> let ms = norm p -- todo: check whether Norm3 and Norm4 are sound
+>               in case lookupMN l ms of 
+>                  { Just pi -> do 
+>                     { pi' <- refine ureq pi d
+>                     ; let ms' = updateMN l pi' ms 
+>                     ; return (denorm ms')
+>                     }
+>                  ; Nothing -> do 
+>                     { let ms' = insertMN l (mkPat x d) ms
+>                     ; return (denorm ms')
+>                     }
+>                  }
+>  }
 
 
 
@@ -218,6 +318,26 @@ $\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
 
 
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
+                            
+> norm :: Pat -> Monomials                            
+> norm = undefined
+
+> type Monomials = [M.Map Char Pat] -- group by common second components
+
+> lookupMN :: Char -> Monomials -> Maybe Pat
+> lookupMN = undefined
+
+> updateMN :: Char -> Pat -> Monomials -> Monomials
+> updateMN = undefined
+
+> insertMN :: Char -> Pat -> Monomials -> Monomials
+> insertMN = undefined
+
+> mkPat :: Int -> Doc -> Pat 
+> mkPat = undefined
+
+> denorm :: Monomials -> Pat
+> denorm = undefined
 
 norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
                           
