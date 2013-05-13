@@ -74,72 +74,73 @@ to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that 
 \gamma ::= { (i, r) , ... , }
 i ::= 1,2,3,...
 
-> type UReq = [(Int, RE)]
+> type UReq = [(Int, Re)]
 
-> lookupUR :: Int -> UReq -> Maybe RE
+> lookupUR :: Int -> UReq -> Maybe Re
 > lookupUR i env = lookup i env
 
-> updateUR :: Int -> RE -> UReq -> UReq
-> updateUR = undefined -- todo
+> updateUR :: Int -> Re -> UReq -> UReq
+> updateUR x r ureq = map (\(y,t) -> if (x == y) then (y,r) else (y,t)) ureq
 
  * The Regular expression 
              
 p ::= r^i 
 r ::= () || (p|p) || pp || p* || l || \phi 
                           
-> data Pat = Pat RE Int
+> data Re where
+>  Choice :: Int -> [Re] -> Re
+>  Pair :: Int -> Re -> Re -> Re
+>  Star :: Int -> Re -> Re
+>  Ch :: Int -> Char -> Re
+>  Eps :: Int -> Re
+>  Phi :: Re
+>  deriving Show
 
-> data RE where
->  Empty  :: RE  
->  Choice :: Pat -> Pat -> RE
->  Seq    :: Pat -> Pat -> RE
->  Star   :: Pat -> RE
->  L      :: Char -> RE 
->  Phi    :: RE 
 
 > class PosEmpty t where
 >   posEmpty :: t -> Bool
 
-> instance PosEmpty Pat where
->   posEmpty (Pat r _) = posEmpty r
 
-> instance PosEmpty RE where
->   posEmpty Empty          = True
->   posEmpty (Choice p1 p2) = posEmpty p1 || posEmpty p2
->   posEmpty (Seq p1 p2)    = posEmpty p1 && posEmpty p2
->   posEmpty (Star _)       = True
->   posEmpty (L _ )         = False
+> instance PosEmpty Re where
+>   posEmpty (Eps _)        = True
+>   posEmpty (Choice _ rs)  = any posEmpty rs
+>   posEmpty (Pair _ r1 r2) = posEmpty r1 && posEmpty r2
+>   posEmpty (Star _ _)     = True
+>   posEmpty (Ch _ _)       = False
 >   posEmpty Phi            = False
 
 
 > class Deriv t where
 >   deriv :: t -> Char -> t
 
-> instance Deriv Pat where
->   deriv (Pat r i) l = Pat (deriv r l) i
-
-> instance Deriv RE where
->   deriv Empty _ = Phi
->   deriv (Choice p1 p2) l = Choice (deriv p1 l) (deriv p2 l)
->   deriv (Seq p1 p2) l | posEmpty p1 = Choice (Seq (deriv p1 l) p2) (deriv p2 l)
->                       | otherwise = Seq (deriv p1 l) p2
->   deriv (Star p) l = Seq (deriv p l) (Star p)
->   deriv (L c) l | c == l = Empty
->                 | otherwise = Phi
+> instance Deriv Re where
+>   deriv (Eps _) _ = Phi
+>   deriv (Choice x rs) l = Choice x (map (\r -> deriv r l) rs)
+>   deriv (Pair x r1 r2) l | posEmpty r1 = Choice x [Pair x (deriv r1 l) r2, deriv r2 l]
+>                          | otherwise = Pair x (deriv r1 l) r2
+>   deriv (Star x r) l = Pair x (deriv r l) (Star x r)
+>   deriv (Ch x c) l | c == l = (Eps x)
+>                    | otherwise = Phi
 >   deriv Phi _ = Phi
 
 
 > class Accept t where
 >   accept :: t -> Doc -> Bool
 
-> instance Accept Pat where
->   accept (Pat r i) d = accept r d
-
-> instance Accept RE where
+> instance Accept Re where
 >   accept r ls = posEmpty $ foldl (\r l -> deriv r l) r ls 
 
 > type Doc = [Char]
 
+> getLabel :: Re -> Maybe Int
+> getLabel (Eps x)      = Just x
+> getLabel (Choice x _) = Just x
+> getLabel (Pair x _ _) = Just x
+> getLabel (Star x _)   = Just x
+> getLabel (Ch x _)     = Just x
+> getLabel Phi          = Nothing
+
+> dontcare = -1
 
 
 === The Replacement Relation ===
@@ -157,7 +158,7 @@ The first property ensures that the replacement is subsuming the orginal regex $
 The second property ensures that if $d$ is not in $r$, the replacement shall have the same requirement-shape as the orginal one and conform to the user requirement. 
 
 
-> replacement :: UReq -> Pat -> Doc -> Pat -> Bool 
+> replacement :: UReq -> Re -> Doc -> Re -> Bool 
 
   i \in dom(\gamma) 
   d \in \gamma(i) 
@@ -165,7 +166,7 @@ The second property ensures that if $d$ is not in $r$, the replacement shall hav
  ----------------------------- (pExist)
   \gamma, r^i \vdash d : r'^i
 
-> replacement ureq (Pat r i) d (Pat r' i') = undefined       
+> replacement = undefined       
 
 
    i \not \in dom(\gamma)
@@ -229,23 +230,32 @@ to denote the refinement algorithm.
 
 The algorithm correctness property (Soundness)
 
-Let $\gamma$ be the user requirement, $p$ denote the initial regular expression pattern, $d$ denote the input document
-$\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
+Let $\gamma$ be the user requirement, $r$ denote the initial regular expression pattern, $d$ denote the input document
+$\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
 
 
-> refine :: UReq -> Pat -> Doc -> Maybe Pat -- a Maybe monad is required in case of \gamma / l^x failure
+> refine :: UReq -> Re -> Doc -> Maybe Re -- a Maybe monad is required in case of \gamma / l^x failure
+
+ singleton(d) = r
+ ----------------------------- (Phi1)
+ \gamma, \phi \models d : r
 
   () \in r 
  -------------------------------------- (Emp1)
- \gamma r^x \models () : r^x
+ \gamma, r^x \models () : r^x
 
 
   () \not \in r 
  -------------------------------------- (Emp2)
  \gamma r^x \models () : (r^x|()^x)^x
 
-> refine ureq p@(Pat r x) [] | posEmpty r = return p
->                            | otherwise  = return (Pat (Choice p (Pat Empty x)) x)
+> refine ureq Phi [] = return (Eps dontcare)
+> refine ureq Phi cs = return (singleton dontcare cs)
+
+> refine ureq r [] | posEmpty r = return r
+>                  | otherwise  = do { x <- getLabel r
+>                                    ; return (Choice x [r, Eps x])
+>                                    }
 
   r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn)
   t/l^x = t'
@@ -279,11 +289,12 @@ $\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
   \gamma, r^x \models ld : r'^x
 
 
-> refine ureq p@(Pat r x) (l:d) = 
->   case lookupUR x ureq of 
->   { Just t -> let t' = deriv t l
->                   ms = norm p
->               in case lookupMN l ms of 
+> refine ureq r (l:d) = do 
+>   { x <- getLabel r
+>   ; case lookupUR x ureq of 
+>     { Just t -> let t' = deriv t l
+>                     ms = norm r
+>                 in case lookupMN l ms of 
 >                  { Just pi -> do 
 >                     { let ureq' = updateUR x t' ureq
 >                     ; pi' <- refine ureq' pi d
@@ -292,23 +303,24 @@ $\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
 >                     }
 >                  ; Nothing 
 >                     | t' `accept` d  -> do 
->                     { let ms' = insertMN l (mkPat x d) ms
+>                     { let ms' = insertMN l (singleton x d) ms
 >                     ; return (denorm ms')
 >                     }
->                     | otherwise -> [] 
+>                     | otherwise -> Nothing
 >                  }
->  ; Nothing -> let ms = norm p -- todo: check whether Norm3 and Norm4 are sound
->               in case lookupMN l ms of 
+>     ; Nothing -> let ms = norm r -- todo: check whether Norm3 and Norm4 are sound
+>                  in case lookupMN l ms of 
 >                  { Just pi -> do 
 >                     { pi' <- refine ureq pi d
 >                     ; let ms' = updateMN l pi' ms 
 >                     ; return (denorm ms')
 >                     }
 >                  ; Nothing -> do 
->                     { let ms' = insertMN l (mkPat x d) ms
+>                     { let ms' = insertMN l (singleton x d) ms
 >                     ; return (denorm ms')
 >                     }
 >                  }
+>     }
 >  }
 
 
@@ -317,29 +329,36 @@ $\gamma, p \models d : q$ implies $\gamma, p \vdash d : q$.
 ==== $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ ====
 
 
+> data Monomials = WithEps [M.Map Char Re] -- group by common second components
+>                | WithoutEps [M.Map Char Re]
+
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
+
                             
-> norm :: Pat -> Monomials                            
-> norm = undefined
-
-> type Monomials = [M.Map Char Pat] -- group by common second components
-
-> lookupMN :: Char -> Monomials -> Maybe Pat
-> lookupMN = undefined
-
-> updateMN :: Char -> Pat -> Monomials -> Monomials
-> updateMN = undefined
-
-> insertMN :: Char -> Pat -> Monomials -> Monomials
-> insertMN = undefined
-
-> mkPat :: Int -> Doc -> Pat 
-> mkPat = undefined
-
-> denorm :: Monomials -> Pat
-> denorm = undefined
+> norm :: Re -> Monomials                            
+> norm r | posEmpty r = WithEps (norm' r)
+>        | otherwise  = WithoutEps (norm' r)
 
 norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
+
+> norm' :: Re -> [M.Map Char Re]
+> norm' = undefined 
+
+> lookupMN :: Char -> Monomials -> Maybe Re
+> lookupMN = undefined
+
+> updateMN :: Char -> Re -> Monomials -> Monomials
+> updateMN = undefined
+
+> insertMN :: Char -> Re -> Monomials -> Monomials
+> insertMN = undefined
+
+> singleton :: Int -> Doc -> Re 
+> singleton = undefined
+
+> denorm :: Monomials -> Re
+> denorm = undefined
+
                           
 denorm (\bar{m}|()) = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}                           
                       in [ (mkStar plus) | plus <- pluses ] ++ nonpluses
