@@ -322,7 +322,7 @@ $\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
 >                                    ; return (Choice x [r, Eps x])
 >                                    }
 
-  r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn)
+  r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn) -- todo which 'x'? it might not only the top most 'x'!
   t/l^x = t'
   \{x : t'\} \cup \gamma, pi \models d : pi'
   (l1^x,p1)|...| (l^x,pi')|...|(ln^x,pn) \denorm r'^x
