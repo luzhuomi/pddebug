@@ -62,6 +62,8 @@ Refer to the PDDebug.lhs
 
 > import qualified Data.Map as M
 
+> import Data.List 
+
 === The problem === 
 
 Let  $\gamma$ denote the user specification, $d$ denote the input document , $r$ the pattern and  $r'$ the refined pattern, 
@@ -94,34 +96,85 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >  Ch :: Int -> Char -> Re
 >  Eps :: Int -> Re
 >  Phi :: Re
->  deriving Show
+>  deriving (Show, Ord)
 
 
-> class PosEmpty t where
->   posEmpty :: t -> Bool
+> instance Eq Re where
+>     (==) (Choice _ rs1) (Choice _ rs2) = rs1 == rs2
+>     (==) (Pair _ r1 r2) (Pair _ r1' r2') = r1 == r1' && r2 == r2'
+>     (==) (Star _ r1) (Star _ r2) = r1 == r2
+>     (==) (Ch _ c1) (Ch _ c2) = c1 == c2
+>     (==) Eps{} Eps{} = True
+>     (==) Phi Phi = True
+>     (==) _ _ = False
 
 
-> instance PosEmpty Re where
->   posEmpty (Eps _)        = True
->   posEmpty (Choice _ rs)  = any posEmpty rs
->   posEmpty (Pair _ r1 r2) = posEmpty r1 && posEmpty r2
->   posEmpty (Star _ _)     = True
->   posEmpty (Ch _ _)       = False
->   posEmpty Phi            = False
+
+> posEmpty :: Re -> Bool
+> posEmpty (Eps _)        = True
+> posEmpty (Choice _ rs)  = any posEmpty rs
+> posEmpty (Pair _ r1 r2) = posEmpty r1 && posEmpty r2
+> posEmpty (Star _ _)     = True
+> posEmpty (Ch _ _)       = False
+> posEmpty Phi            = False
+
+> isPhi :: Re -> Bool 
+> isPhi Phi            = True
+> isPhi (Ch _ _ )      = False
+> isPhi (Choice _ rs)  = all isPhi rs
+> isPhi (Pair _ r1 r2) = isPhi r1 || isPhi r2 
+> isPhi (Star _ _)     = False
+> isPhi (Eps _)        = False
+
+> isChoice :: Re -> Bool
+> isChoice Choice{} = True
+> isChoice _ = False
+
+> deriv :: Re -> Char -> Re
+> deriv r l = simpFix $ deriv' r l
 
 
-> class Deriv t where
->   deriv :: t -> Char -> t
+> deriv' (Eps _) _ = Phi
+> deriv' (Choice x rs) l = Choice x (map (\r -> deriv' r l) rs)
+> deriv' (Pair x r1 r2) l | posEmpty r1 = Choice x [Pair x (deriv' r1 l) r2, deriv' r2 l]
+>                        | otherwise = Pair x (deriv' r1 l) r2
+> deriv' (Star x r) l = Pair x (deriv' r l) (Star x r)
+> deriv' (Ch x c) l | c == l = (Eps x)
+>                   | otherwise = Phi
+> deriv' Phi _ = Phi
 
-> instance Deriv Re where
->   deriv (Eps _) _ = Phi
->   deriv (Choice x rs) l = Choice x (map (\r -> deriv r l) rs)
->   deriv (Pair x r1 r2) l | posEmpty r1 = Choice x [Pair x (deriv r1 l) r2, deriv r2 l]
->                          | otherwise = Pair x (deriv r1 l) r2
->   deriv (Star x r) l = Pair x (deriv r l) (Star x r)
->   deriv (Ch x c) l | c == l = (Eps x)
->                    | otherwise = Phi
->   deriv Phi _ = Phi
+
+> simpFix :: Re -> Re
+> simpFix p = let q = simp p
+>             in if q == p
+>                then q
+>                else simpFix q
+
+
+> simp :: Re  -> Re 
+> simp (Pair l1 (Eps l2) r) 
+>   | isPhi r   = Phi
+>   | otherwise = r
+> simp (Pair l r1 r2)
+>   | isPhi r1 || isPhi r2 = Phi
+>   | otherwise            = Pair l (simp r1) (simp r2)
+> simp (Choice l []) = Eps l
+> simp (Choice l [r]) = r
+> simp (Choice l rs)
+>  | any isChoice rs =  
+>     Choice l $ 
+>        foldl (\rs-> \r-> case r of
+>                Choice l rs2 -> rs ++ rs2
+>                _            -> rs ++ [r])
+>              [] rs
+>  | otherwise = Choice l $ nub $ filter (not.isPhi) $ map simp rs
+> simp (Star l1 (Eps l2)) = Eps l2
+> simp (Star l1 (Star l2 r)) = Star l1 r 
+> simp (Star l r)
+>  | isPhi r   = Eps l
+>  | otherwise = Star l $ simp r 
+> simp x = x 
+
 
 
 > class Accept t where
@@ -141,6 +194,16 @@ r ::= () || (p|p) || pp || p* || l || \phi
 > getLabel Phi          = Nothing
 
 > dontcare = -1
+
+
+
+> sigma :: Re -> String
+> sigma (Choice _ rs) = nub $ concat $ map sigma rs
+> sigma (Pair _ r1 r2) = nub $ (sigma r1) ++ (sigma r2)
+> sigma (Star _ r) = sigma r
+> sigma (Ch _ c) = [c]
+> sigma Eps{} = []
+> sigma Phi = []
 
 
 === The Replacement Relation ===
@@ -329,42 +392,140 @@ $\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
 ==== $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ ====
 
 
-> data Monomials = WithEps [M.Map Char Re] -- group by common second components
->                | WithoutEps [M.Map Char Re]
+> data Monomials = WithEps Int ( M.Map Char Re -- Maping l -> r
+>                              , M.Map Re [Re] ) -- Mapping grouped by common trailing kleene's star expression
+>                | WithoutEps Int ( M.Map Char Re -- Mapping l -> r
+>                                 , M.Map Re [Re] ) -- Mapping r -> ls
 
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
 
                             
 > norm :: Re -> Monomials                            
-> norm r | posEmpty r = WithEps (norm' r)
->        | otherwise  = WithoutEps (norm' r)
+> norm Phi = error "applying norm to Phi"
+> norm r | posEmpty r = WithEps x (norm' x r)
+>        | otherwise  = WithoutEps x (norm' x r)
+>    where Just x = getLabel r
 
 norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
 
-> norm' :: Re -> [M.Map Char Re]
-> norm' = undefined 
+> norm' :: Int -> Re -> (M.Map Char Re, M.Map Re [Re])
+> norm' x r = let ms = [ (l, deriv r l) | l <- sigma r ]
+>             in (M.fromList ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (tail_ r, Pair x (Ch x l) (init_ r))) ms))
+
+tail_ returns the right most re in a sequence of Re
+
+> tail_ :: Re -> Re 
+> tail_ (Pair x r1 r2) = tail_ r2
+> tail_ r = r
+
+> init_ :: Re -> Re
+> init_ (Pair x r1 r2) = let r2' = (init_ r2)
+>                        in case r2' of { Eps _ -> r1; _ -> Pair x r1 r2' }
+> init_ r = Eps dontcare
+
+append_ appends two Re(s) by sequence
+
+> append_ :: Int -> Re -> Re -> Re
+> append_ _ (Pair y r1 r2) r3 = Pair y r1 (append_ y r2 r3)
+> append_ x r1 r2 = Pair x r1 r2
+
+> upsert :: Ord k => k -> v -> (v -> v -> v) -> M.Map k v -> M.Map k v
+> upsert k v f m = case M.lookup k m of 
+>                  { Just v' -> M.adjust (\_ -> f v' v) k m 
+>                  ; Nothing -> M.insert k v m }
 
 > lookupMN :: Char -> Monomials -> Maybe Re
-> lookupMN = undefined
+> lookupMN c (WithEps x (m1,m2)) = M.lookup c m1
+> lookupMN c (WithoutEps x (m1,m2)) = M.lookup c m1
 
 > updateMN :: Char -> Re -> Monomials -> Monomials
-> updateMN = undefined
+> updateMN c r (WithEps x (m1,m2)) = 
+>    let r' = tail_ r   -- the tail
+>        r'' = Pair x (Ch x c) (init_ r) -- the label + the prefix
+>    in WithEps x (M.adjust (\_ -> r) c m1, M.adjust (\rs -> rs++[r'']) r' m2) 
+> updateMN c r (WithoutEps x (m1,m2)) = 
+>    let r' = tail_ r   
+>        r'' = Pair x (Ch x c) (init_ r)
+>    in WithoutEps x (M.adjust (\_ -> r) c m1, M.adjust (\rs -> rs++[r''] ) r' m2) 
 
 > insertMN :: Char -> Re -> Monomials -> Monomials
-> insertMN = undefined
+> insertMN c r (WithEps x (m1,m2)) = 
+>    let r' = tail_ r   
+>        r'' = Pair x (Ch x c) (init_ r)  
+>    in WithEps x (M.insert c r m1, M.insert r' [r''] m2) 
+> insertMN c r (WithoutEps x (m1,m2)) = 
+>    let r' = tail_ r   
+>        r'' = Pair x (Ch x c) (init_ r)
+>    in WithoutEps x (M.insert c r m1, M.insert r' [r''] m2) 
 
 > singleton :: Int -> Doc -> Re 
-> singleton = undefined
+> singleton x cs = foldr (\l r -> Pair x (Ch x l) r) (Eps x) cs
 
-> denorm :: Monomials -> Re
-> denorm = undefined
 
-                          
+return a choice if the list is non-singleton
+
+> mkChoice :: Int -> [Re] -> Re 
+> mkChoice x [r] = r
+> mkChoice x rs = Choice x rs
+
 denorm (\bar{m}|()) = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}                           
                       in [ (mkStar plus) | plus <- pluses ] ++ nonpluses
                           
 denorm \bar{m} = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}
                  in [ (mkPlus plus) | plus <- pluses ]  ++ nonpluses
+
+> denorm :: Monomials -> Re
+> denorm (WithEps x (m1,m2)) = 
+>    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
+>        ps = map mkStar (M.toList plusMonoGrp)         
+>        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
+>    in mkChoice x (ps ++ nps)
+> denorm (WithoutEps x (m1,m2)) = 
+>    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
+>        ps = map mkPlus (M.toList plusMonoGrp)         
+>        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
+>    in mkChoice x (ps ++ nps)
+
+
+> mkStar :: (Re, [Re]) -> Re
+> mkStar = fst
+
+> mkPlus :: (Re, [Re]) -> Re
+> mkPlus (Star x r,its) = Pair x r (Star x r)
+
+
+partition map by plus monomial and non plus monomial
+
+> part :: M.Map Re [Re] -> (M.Map Re [Re] , M.Map Re [Re])
+> part m = M.partitionWithKey (\ r rs -> isPlusMN rs r ) m
+
+
+a monomial is a plus mono iff m = (p1|...|pn, r*) and (p1|...|pn) \equiv r and r 
+
+isPlus (p1|...|pn) r* = (p1|...|pn) <= r and r <= (p1|...|pn)
+
+> isPlusMN :: [Re] -> Re -> Bool
+> isPlusMN ps (Star x r) = ((Choice dontcare ps) `contains` r) && (r `contains` (Choice dontcare ps))
+> isPlusMN ps _ = False
+
+the containment check
+
+> contains :: Re -> Re -> Bool
+> contains r1 r2 = contains' M.empty r1 r2
+
+> data Leq = Leq Re Re deriving (Eq, Ord, Show)
+
+> contains' :: M.Map Leq () -> Re -> Re -> Bool
+> contains' env Phi _ = True
+> contains' env r1 r2 = 
+>   case M.lookup (Leq r1 r2) env of   
+>    { Just _  -> True  
+>    ; Nothing | posEmpty r1 && not (posEmpty r2) -> False
+>              | otherwise -> let env' = M.insert (Leq r1 r2)  () env
+>                             in  all (\l -> contains' env' (deriv r1 l) (deriv r2 l)) (sigma (Choice dontcare [r1,r2]))
+>    }
+
+                          
                           
 denorm' \bar{m} = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
 
