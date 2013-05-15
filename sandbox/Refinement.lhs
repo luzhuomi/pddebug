@@ -61,8 +61,10 @@ Refer to the PDDebug.lhs
 > module Main where
 
 > import qualified Data.Map as M
-
+> import System.IO.Unsafe
 > import Data.List 
+
+> logger io = unsafePerformIO io
 
 === The problem === 
 
@@ -361,8 +363,10 @@ $\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
 >                  { Just pi -> do 
 >                     { let ureq' = updateUR x t' ureq
 >                     ; pi' <- refine ureq' pi d
->                     ; let ms' = updateMN l pi' ms 
->                     ; return (denorm ms')
+>                     ; let io = logger (putStrLn ("\n pi' = " ++ (show pi') ++ "l =" ++ (show l)))
+>                     ; let ms' = io `seq` updateMN l pi' ms 
+>                     ; let io = ms' `seq` logger (putStrLn ("\n ms' = " ++ (show ms')))
+>                     ; io `seq` return (denorm ms')
 >                     }
 >                  ; Nothing 
 >                     | t' `accept` d  -> do 
@@ -396,6 +400,7 @@ $\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
 >                              , M.Map Re [Re] ) -- Mapping grouped by common trailing kleene's star expression
 >                | WithoutEps Int ( M.Map Char Re -- Mapping l -> r
 >                                 , M.Map Re [Re] ) -- Mapping r -> ls
+>           deriving Show
 
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
 
@@ -442,21 +447,21 @@ append_ appends two Re(s) by sequence
 > updateMN c r (WithEps x (m1,m2)) = 
 >    let r' = tail_ r   -- the tail
 >        r'' = Pair x (Ch x c) (init_ r) -- the label + the prefix
->    in WithEps x (M.adjust (\_ -> r) c m1, M.adjust (\rs -> rs++[r'']) r' m2) 
+>    in WithEps x (M.adjust (\_ -> r) c m1, upsert r' [r''] (++) m2)  -- the subfix r' might not be in m2
 > updateMN c r (WithoutEps x (m1,m2)) = 
 >    let r' = tail_ r   
 >        r'' = Pair x (Ch x c) (init_ r)
->    in WithoutEps x (M.adjust (\_ -> r) c m1, M.adjust (\rs -> rs++[r''] ) r' m2) 
+>    in WithoutEps x (M.adjust (\_ -> r) c m1, upsert r' [r''] (++) m2) 
 
 > insertMN :: Char -> Re -> Monomials -> Monomials
 > insertMN c r (WithEps x (m1,m2)) = 
 >    let r' = tail_ r   
 >        r'' = Pair x (Ch x c) (init_ r)  
->    in WithEps x (M.insert c r m1, M.insert r' [r''] m2) 
+>    in WithEps x (M.insert c r m1, upsert r' [r''] (++) m2) 
 > insertMN c r (WithoutEps x (m1,m2)) = 
 >    let r' = tail_ r   
 >        r'' = Pair x (Ch x c) (init_ r)
->    in WithoutEps x (M.insert c r m1, M.insert r' [r''] m2) 
+>    in WithoutEps x (M.insert c r m1, upsert r' [r''] (++) m2) 
 
 > singleton :: Int -> Doc -> Re 
 > singleton x cs = foldr (\l r -> Pair x (Ch x l) r) (Eps x) cs
@@ -474,17 +479,18 @@ denorm (\bar{m}|()) = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm'
 denorm \bar{m} = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}
                  in [ (mkPlus plus) | plus <- pluses ]  ++ nonpluses
 
+
 > denorm :: Monomials -> Re
 > denorm (WithEps x (m1,m2)) = 
 >    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
 >        ps = map mkStar (M.toList plusMonoGrp)         
 >        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
->    in mkChoice x (ps ++ nps)
+>    in simpFix $ mkChoice x (ps ++ nps)
 > denorm (WithoutEps x (m1,m2)) = 
 >    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
 >        ps = map mkPlus (M.toList plusMonoGrp)         
 >        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
->    in mkChoice x (ps ++ nps)
+>    in simpFix $ mkChoice x (ps ++ nps)
 
 
 > mkStar :: (Re, [Re]) -> Re
@@ -505,24 +511,24 @@ a monomial is a plus mono iff m = (p1|...|pn, r*) and (p1|...|pn) \equiv r and r
 isPlus (p1|...|pn) r* = (p1|...|pn) <= r and r <= (p1|...|pn)
 
 > isPlusMN :: [Re] -> Re -> Bool
-> isPlusMN ps (Star x r) = ((Choice dontcare ps) `contains` r) && (r `contains` (Choice dontcare ps))
+> isPlusMN ps (Star x r) = ((Choice dontcare ps) `subsumedBy` r) && (r `subsumedBy` (Choice dontcare ps))
 > isPlusMN ps _ = False
 
 the containment check
 
-> contains :: Re -> Re -> Bool
-> contains r1 r2 = contains' M.empty r1 r2
+> subsumedBy :: Re -> Re -> Bool
+> subsumedBy r1 r2 = subsumedBy' M.empty r1 r2
 
 > data Leq = Leq Re Re deriving (Eq, Ord, Show)
 
-> contains' :: M.Map Leq () -> Re -> Re -> Bool
-> contains' env Phi _ = True
-> contains' env r1 r2 = 
+> subsumedBy' :: M.Map Leq () -> Re -> Re -> Bool
+> subsumedBy' env Phi _ = True
+> subsumedBy' env r1 r2 = 
 >   case M.lookup (Leq r1 r2) env of   
 >    { Just _  -> True  
 >    ; Nothing | posEmpty r1 && not (posEmpty r2) -> False
 >              | otherwise -> let env' = M.insert (Leq r1 r2)  () env
->                             in  all (\l -> contains' env' (deriv r1 l) (deriv r2 l)) (sigma (Choice dontcare [r1,r2]))
+>                             in  all (\l -> subsumedBy' env' (deriv r1 l) (deriv r2 l)) (sigma (Choice dontcare [r1,r2]))
 >    }
 
                           
@@ -539,4 +545,20 @@ mkPlus ms = let fs = map fst ms
                 (Star r) = snd (head ms)
             in if (sort fs) == (sort (choiceToList r)) then (r, (Star r)) else ms
                           
+r1 = (A|B)*
 
+> r1 = Star 1 (Choice 2 [Ch 3 'A', Ch 4 'B'])
+
+r2 = (A|B|C)*
+
+> r2 = Star 1 (Choice 2 [Ch 3 'A'])
+
+r3 = .+
+
+> r3 = Pair dontcare (Choice dontcare [Ch dontcare 'A',Ch dontcare 'B',Ch dontcare 'C']) (Star dontcare (Choice dontcare [Ch dontcare 'A',Ch dontcare 'B',Ch dontcare 'C']))
+
+
+
+> v = "ABC"
+
+> g = [(1::Int, r3)]
