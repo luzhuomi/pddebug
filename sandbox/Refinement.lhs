@@ -4,15 +4,19 @@ The regular expression refinement algorithm
 
 Inspired by the type checking system and type inference algorithm found in programming language research communities. \cite{TODO}
 
-# Type checking and Type inference algorithm 
+Type checking and Type inference algorithm 
+==========================================
 
-## Type checking judgement 
+Type checking judgement
+-----------------------
+
 $\gamma \vdash e : t$ 
 Given the type environemnt $\gamma$, the program expression e and the type $t$, the above is deducable if $e$ has type $t$ under the type environment $\gamma$
 
 Note that the type checking is a relation, where $\gamma$, $e$ and $t$ are the inputs.
 
-## Type inference judgement 
+Type inference judgement 
+------------------------
 
 $\gamma \models e : t$
 
@@ -20,7 +24,7 @@ Given the type environment \gamma and the program expression e the algorithm rec
 
 Note that the type inference is considered an function, where \gamma and e are the inputs.
 
-### Type inference correctness
+ * Type inference correctness
 
 $\gamma \models e : t$ 
 implies 
@@ -29,16 +33,19 @@ $\gamma \vdash e : t$
 
 
 
-# Regular expression debugging and reconstruction 
+Regular expression debugging and reconstruction 
+===============================================
 
-## The connection 
+The connection 
+--------------
 
 Pointed out the XDuce work, we consider the correspondence between the program expression $e$ and the document $d$,
 the type $t$ and the regular expression $r$.
 
  * The word problem  $d \in r$ corresponds to the type checking problem.
 
-## The difference 
+The difference 
+--------------
 
  * The matching problem 
 
@@ -47,16 +54,19 @@ the type $t$ and the regular expression $r$.
 where r is annotated with label at each AST level. $\Delta$ maps labels to sub-matches.
 
 
-## The mechanism 
+The mechanism 
+-------------
 
 We use derivative (or partial derivative) operations to implement the word problem and the sub matching problem. See our recent papers (PPDP 12 )
 
 
-## The debugging algorithm 
+The debugging algorithm 
+-----------------------
 
 Refer to the PDDebug.lhs
 
-## The Refinement checking judgement 
+The Refinement checking judgement 
+---------------------------------
 
 > module Main where
 
@@ -66,7 +76,7 @@ Refer to the PDDebug.lhs
 
 > logger io = unsafePerformIO io
 
-### The problem 
+ * The problem 
 
 Let  $\gamma$ denote the user specification, $d$ denote the input document , $r$ the pattern and  $r'$ the refined pattern, 
 we use the judgement 
@@ -208,7 +218,7 @@ r ::= () || (p|p) || pp || p* || l || \phi
 > sigma Phi = []
 
 
-### The Replacement Relation 
+ * The Replacement Relation 
 We use the following judgement to denote the replacement relation
 $$ \gamma, p \turns d : q $$ 
 where $\gamma$ is the user requirement, $p$ is the existing regular expression, $d$ is the input document and $q$ is the replacement regular expression.
@@ -287,7 +297,7 @@ Rules rSeq, rOr1, rOr2 and rStar validate the replacement relation indeterminist
 
 
 
-### The Refinement Algorithm 
+ *  The Refinement Algorithm 
 
 We use the judgement 
 $$\gamma,p \models d : q $$ 
@@ -401,7 +411,7 @@ $\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
 
 
 
-#### $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$
+  $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$
 
 
 > data Monomials = WithEps Int ( M.Map Char Re -- Maping l -> r
