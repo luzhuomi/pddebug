@@ -98,6 +98,9 @@ i ::= 1,2,3,...
 > updateUR :: Int -> Re -> UReq -> UReq
 > updateUR x r ureq = map (\(y,t) -> if (x == y) then (y,r) else (y,t)) ureq
 
+> allAccEps :: UReq -> Bool
+> allAccEps ureq = all (\(x,t) -> posEmpty t) ureq
+
  * The Regular expression 
              
 p ::= r^i 
@@ -197,6 +200,8 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >   pderiv :: t -> Char -> [Re]
 
 
+partial derivatives of regex
+
 > instance PDeriv Re where
 >   pderiv (Eps _) _ = []
 >   pderiv (Choice x rs) l = nub $ concatMap (\r -> pderiv r l) rs -- x?
@@ -207,9 +212,32 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >                     | otherwise = []
 >   pderiv Phi _ = []
 
+partial derivatives of a set of regexs
+
 > instance PDeriv t => PDeriv [t] where
 >   pderiv rs l = concatMap (\r -> pderiv r l) rs
 
+partial dervatives extend to user req and regex
+
+> data URPair = URPair Recommend UReq Re deriving (Show, Eq)
+
+> data Recommend = Strong | Weak | Fixed deriving (Show, Eq)
+
+> instance Ord Recommend where
+>   compare Fixed Fixed = EQ
+>   compare Fixed _     = GT
+>   compare Strong Strong = EQ
+>   compare Strong Weak = GT
+>   compare Strong Fixed = LT
+>   compare Weak Weak = EQ
+>   compare Weak _ = LT
+
+> class URPDeriv t where
+>   urPDeriv :: 
+
+partial derivative
+  
+  
 
 > class Accept t where
 >   accept :: t -> Doc -> Bool
@@ -363,108 +391,62 @@ refined sub regex (nfa state).
 The algorithm correctness property (Soundness)
 
 Let $\gamma$ be the user requirement, $r$ denote the initial regular expression pattern, $d$ denote the input document
-$\gamma, r \models d : r'$ implies $\gamma, r \vdash d : r'$.
+$ \{ \gamma, r \} \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r1'|...|rn'$.
 
 
-> refine :: UReq -> Re -> Doc -> Maybe Re -- a Maybe monad is required in case of \gamma / l^x failure
-
- singleton(d) = r
- ----------------------------- (Phi1)
- \gamma, \phi \models d : r
-
-  () \in r 
- -------------------------------------- (Emp1)
- \gamma, r^x \models () : r^x
+> refine :: [(UReq, Re)] -> Doc -> [Re] 
 
 
-  () \not \in r 
- -------------------------------------- (Emp2)
- \gamma r^x \models () : (r^x|()^x)^x
+```
+ -------------------------------------------------------------------------------------------------- (Eps)
+  \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \models \epsilon : 
+         \{ (\gamma_i, r_i) | (\gamma_i,r_i) \in \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \wedge   
+                              \epsilon \in \gamma_i (x) \forall x in \gamma_i \wedge 
+                              \epsilon \in r_i \}  ++ 
+                              (\gamma_i,r_i?) \in \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \wedge   
+                              \epsilon \in \gamma_i (x) \forall x in \gamma_i \wedge 
+                              \epsilon \not \in r_i \}  
 
-> refine ureq Phi [] = return (Eps dontcare)
-> refine ureq Phi cs = return (singleton dontcare cs)
+```
 
-> refine ureq r [] | posEmpty r = return r
->                  | otherwise  = do { x <- getLabel r
->                                    ; return (Choice x [r, Eps x])
->                                    }
+> refine urs [] = 
+>   let urs' = filter (\ (u,r) -> allAccEps u ) urs 
+>       (urs_rAccEps, urs_rNAccEps) = partition (\ (u,r) -> posEmpty r) urs'
+>       rNAccEpsEps = map (\(u,r) -> let x = topLabel r in (Choice x [r, Eps x])) urs_rNAccEps
+>       rAccEps = map snd urs_rAccEps
+>   in rAccEps ++ rNAccEpsEps
 
- p \norm (l1,p1,\bar{x1}
+```
+   \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} / l =     \{ (\gamma_1', r_1'), ..., (\gamma_m', r_m') \}
+   
+    \{ (\gamma_1', r_1'), ..., (\gamma_m', r_m') \} \models v : \{ q_1', ... q_k' \}
+   
+   \{ r_1, ..., r_n \} ~>_norm  \{ (l_1, \bar{r}_1), ... (l,  \bar{r} ), ...,  (l_j, \bar{r}_j) \} -- TODO: check why no need to takes in the user req? ANS: yes. no need, other monomials is not activated by the input lv.
+  
+    \{ (l_1, \bar{r}_1), ... (l,  \bar{q'} ), ...,  (l_j, \bar{r}_j) \} ~>_denorm \{q_1, ..., q_h \}
+ -------------------------------------------------------------------------------------------------- (Norm)
+  \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \models (lv) : \{q_1, ..., q_h \}
+```
 
+> refine urs (l:w) = 
+>   let urs' = pderiv urs l 
+>       qs'  = refine urs' w        
+>       ms   = norm (map snd urs)
+>       ms'  = combine ms l qs'
+>       qs   = denorm ms'
+>   in qs
+>   where combine :: Monomials -> Char -> [Re] -> Monomials
+>         combine = undefined
 
- -------------------------------------------
- \gamma, p \models ld : q
+extracts the topmost level label
 
-
-  r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn) -- todo which 'x'? it might not only be the top most 'x'!
-  t/l^x = t'
-  \{x : t'\} \cup \gamma, pi \models d : pi'
-  (l1^x,p1)|...| (l^x,pi')|...|(ln^x,pn) \denorm r'^x
- ----------------------------------------------- (Norm1)
- \{x : t\} \cup \gamma, r^x \models ld : r'^x
-                                            
-                                            
-  r^x \norm (l1^x,p1)|...|(ln^x,pn)
-  \not \exists i \in \{1,n\} l_i = l
-  ld \in t
-  (l1^x,p1)|...|(ln^x,pn)|(l^x,d^x) \denorm r'^x                           
-  ----------------------------------------------- (Norm2)
-  \{x : t\} \cup \gamma, r^x \models ld : r'^x
-
-
- x \not \in dom(\gamma)
- r^x \norm (l1^x,p1)|...| (l^x,pi) |...|(ln^x,pn)
- \gamma, pi \models d : pi'                                    
-  (l1^x,p1)|...| (l^x,pi')|...|(ln^x,pn) \denorm r'^x                              
- ----------------------------------------------- (Norm3)
- \gamma, r^x \models ld : r'^x
- 
-
-  x \not \in dom(\gamma)
-  r^x \norm (l1^x,p1)|...|(ln^x,pn)
-  \not \exists i \in \{1,n\} l_i = l  
-  (l1^x,p1)|...|(ln^x,pn)|(l^x,d^x) \denorm r'^x                         
-  ----------------------------------------------- (Norm4)
-  \gamma, r^x \models ld : r'^x
-
-
-> refine ureq r (l:d) = do 
->   { x <- getLabel r
->   ; case lookupUR x ureq of 
->     { Just t -> let t' = deriv t l
->                     ms = norm r
->                 in case lookupMN l ms of 
->                  { Just pi -> do 
->                     { let ureq' = updateUR x t' ureq
->                     ; pi' <- refine ureq' pi d
->                     ; let io = logger (putStrLn ("\n pi' = " ++ (show pi') ++ "l =" ++ (show l)))
->                     ; let ms' = io `seq` updateMN l pi' ms 
->                     ; let io = ms' `seq` logger (putStrLn ("\n ms' = " ++ (show ms')))
->                     ; io `seq` return (denorm ms')
->                     }
->                  ; Nothing 
->                     | t' `accept` d  -> do 
->                     { let ms' = insertMN l (singleton x d) ms
->                     ; return (denorm ms')
->                     }
->                     | otherwise -> Nothing
->                  }
->     ; Nothing -> let ms = norm r -- todo: check whether Norm3 and Norm4 are sound
->                  in case lookupMN l ms of 
->                  { Just pi -> do 
->                     { pi' <- refine ureq pi d
->                     ; let ms' = updateMN l pi' ms 
->                     ; return (denorm ms')
->                     }
->                  ; Nothing -> do 
->                     { let ms' = insertMN l (singleton x d) ms
->                     ; return (denorm ms')
->                     }
->                  }
->     }
->  }
-
-
+> topLabel :: Re -> Int
+> topLabel (Eps x) = x
+> topLabel (Ch x _) = x
+> topLabel (Choice x _) = x
+> topLabel (Pair x _ _) = x
+> topLabel (Star x _) = x
+> topLabel Phi = dontcare
 
 
   $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ 
