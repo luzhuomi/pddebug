@@ -212,12 +212,40 @@ partial derivatives of regex
 >                     | otherwise = []
 >   pderiv Phi _ = []
 
-partial derivatives of a set of regexs
+ * partial derivatives of a set of regexs
 
 > instance PDeriv t => PDeriv [t] where
 >   pderiv rs l = concatMap (\r -> pderiv r l) rs
 
-partial dervatives extend to user req and regex
+* partial dervatives extended to user-requirement-regex pair
+
+We need to annotate the URPair with the recommendation info to 'disambiguate' the refinement process. 
+To elaborate, we first need to consider the extension of partial derivative operation over the user-requirement-regex pairs.
+
+ ** Case: i \not\in dom(\gamma)
+                    
+  (\gamma, \epsilon_i) / l = \{\}   (Eps1) 
+  (\gamma, l_i) / l = \{ \epsilon_i \} (LabMatch1)
+  (\gamma, l_i') / l = \{ \} (LabMisMatch1)                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \} ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise  = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \}
+  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1)), r1)/l ++ (\gamma(fv(r2)), r2) -- todo what about 'i'?
+  (\gamma, r*_i) / l = \{ (\gamma', r'r*) | (\gamma', r') <- r / l \}
+                    
+ ** Case: i \in dom(\gamma)
+  (\gamma, \epsilon_i) / l = \{\}   (Eps2) 
+  (\gamma, l_i) / l = \{ \epsilon_i \} (LabMatch2)
+  (\gamma, l_i') / l = \{ \} (LabMisMatch2)                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = \{ (\gamma' ++ \gamma(fv(r2)) ++ \{ (i, |\gamma(i)/l \} , (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \} ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise  = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \}
+  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1)), r1)/l ++ (\gamma(fv(r2)), r2) /l -- todo what about 'i'? 
+                    
+                    
+                  
+NOTE: \gamma([i1,...,in]) denotes { (i,r) | (i,r) \in \gamma, i \in \{ i1,..., in \} }                  
+               
+                     
+
 
 > data URPair = URPair Recommend UReq Re deriving (Show, Eq)
 
@@ -233,7 +261,10 @@ partial dervatives extend to user req and regex
 >   compare Weak _ = LT
 
 > class URPDeriv t where
->   urPDeriv :: 
+>   urPDeriv :: t -> Char -> [URPair]
+
+> instance URPDeriv URPair where
+>   urPDeriv (URPair rec ureq r) = 
 
 partial derivative
   
