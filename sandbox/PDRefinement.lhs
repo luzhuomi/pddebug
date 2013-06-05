@@ -107,11 +107,11 @@ p ::= r^i
 r ::= () || (p|p) || pp || p* || l || \phi 
                           
 > data Re where
->  Choice :: Int -> [Re] -> Re
->  Pair :: Int -> Re -> Re -> Re
->  Star :: Int -> Re -> Re
->  Ch :: Int -> Char -> Re
->  Eps :: Int -> Re
+>  Choice :: [Int] -> [Re] -> Re
+>  Pair :: [Int] -> Re -> Re -> Re
+>  Star :: [Int] -> Re -> Re
+>  Ch :: [Int] -> Char -> Re
+>  Eps :: [Int] -> Re
 >  Phi :: Re
 >  deriving (Show, Ord)
 
@@ -229,8 +229,8 @@ To elaborate, we first need to consider the extension of partial derivative oper
   (\gamma, l_i') / l = \{ \} (LabMisMatch1)                   
   (\gamma, (r1r2)_i) /l | \epsilon \in r1 = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \} ++  (\gamma(fv(r2)), r2) / l
                         | otherwise  = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \}
-  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1)), r1)/l ++ (\gamma(fv(r2)), r2) -- todo what about 'i'?
-  (\gamma, r*_i) / l = \{ (\gamma', r'r*) | (\gamma', r') <- r / l \}
+  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) 
+  (\gamma, r*_i) / l = \{ (\gamma', r'r*_i) | (\gamma', r') <- r / l \}
                     
  ** Case: i \in dom(\gamma)
   (\gamma, \epsilon_i) / l = \{\}   (Eps2) 
