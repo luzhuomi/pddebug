@@ -260,7 +260,27 @@ The problem with the above adjustment is that we will end up with many unwanted 
 Let's consider an example. 
 ...
 
-\gamma, (a|b)* / b = { r   }  { (a|b)*, (a|b)* } 
+\gamma, (a_1|b_2)_0*_3 / b = { (\gamma',(r',(a|b)*)) | (\gamma',r') <- (\gamma, (a|b)) / b }  
+
+\gamma, (a_1|b_2)_0 / b = { \epsilon, \epsilon } -- note that thanks to  (LabMisMatch1'), the first epsilon was produced by \gamma,a / b
+
+As a result 
+
+\gamma, (a_1|b_2)_0*_3 / b = { (\gamma, (a|b)*), (\gamma, (a|b)*) }
+
+However, the second  (\gamma, (a|b)*) (coming from the second \epsilon) seems to be more important since it is produced by \gamma, b/b
+
+
+Let's consider another example
+
+
+
+({ (0 : (a|b|c)) }, (a_1|b_2)_0*_3) / c  = 
+  { (\gamma',(r',(a|b)*)) | (\gamma',r') <- ({ (0 : (a|b|c)) }, (a|b)) / c }      
+
+({ (0 : (a|b|c)) }, (a_1|b_2)_0 ) / c = { \epsilon, \epsilon }
+
+denorm {(c, { (a|b)*, (a|b)* }), (a, {(a|b)*}), (b, {(a|b)*})} = 
 
 
 > data URPair = URPair Recommend UReq Re deriving (Show, Eq)
