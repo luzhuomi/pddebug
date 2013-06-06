@@ -224,27 +224,43 @@ To elaborate, we first need to consider the extension of partial derivative oper
 
  ** Case: i \not\in dom(\gamma)
                     
-  (\gamma, \epsilon_i) / l = \{\}   (Eps1) 
-  (\gamma, l_i) / l = \{ \epsilon_i \} (LabMatch1)
-  (\gamma, l_i') / l = \{ \} (LabMisMatch1)                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \} ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise  = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \}
+  (\gamma, \epsilon_i) / l = {}   (Eps1) 
+  (\gamma, l_i) / l = { \epsilon_i } (LabMatch1)
+  (\gamma, l_i') / l = { } (LabMisMatch1)                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }
   (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) 
-  (\gamma, r*_i) / l = \{ (\gamma', r'r*_i) | (\gamma', r') <- r / l \}
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- r / l }
                     
  ** Case: i \in dom(\gamma)
-  (\gamma, \epsilon_i) / l = \{\}   (Eps2) 
-  (\gamma, l_i) / l = \{ \epsilon_i \} (LabMatch2)
-  (\gamma, l_i') / l = \{ \} (LabMisMatch2)                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = \{ (\gamma' ++ \gamma(fv(r2)) ++ \{ (i, |\gamma(i)/l \} , (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \} ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise  = \{ (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l \}
-  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1)), r1)/l ++ (\gamma(fv(r2)), r2) /l -- todo what about 'i'? 
+  (\gamma, \epsilon_i) / l = {}   (Eps2) 
+  (\gamma, l_i) / l = { \epsilon_i } (LabMatch2)
+  (\gamma, l_i') / l = { } (LabMisMatch2)                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, |\gamma(i)/l } , (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }
+  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l 
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- r / l }
                     
                     
                   
-NOTE: \gamma([i1,...,in]) denotes { (i,r) | (i,r) \in \gamma, i \in \{ i1,..., in \} }                  
+NOTE: \gamma([i1,...,in]) denotes { (i,r) | (i,r) \in \gamma, i \in { i1,..., in } }                  
                
-                     
+  The above formulation does not refine in case of failure, i.e. pd yields { }. See cases (Eps1), (Eps2), (LabMistMach1) and (LabMistMach2).
+
+An immediate (naive) fix would be like the following.                   
+
+  (\gamma, \epsilon_i) / l = { \epsilon_i }   (Eps1') 
+  (\gamma, l_i') / l = { \epsilon_i } (LabMisMatch1')                   
+
+  (\gamma, \epsilon_i) / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (Eps2') 
+  (\gamma, l_i') / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (LabMisMatch2')
+                  
+
+The problem with the above adjustment is that we will end up with many unwanted refinement and the size of the regex is blown up. 
+Let's consider an example. 
+...
+
+\gamma, (a|b)* / b = { r   }  { (a|b)*, (a|b)* } 
 
 
 > data URPair = URPair Recommend UReq Re deriving (Show, Eq)
@@ -363,7 +379,7 @@ The second property ensures that if $d$ is not in $r$, the replacement shall hav
  \gamma, r1|r2 \vdash d : r1|r2'                          
 
 
-  \gamma, r \vdash di : r'  \forall i \in \{1,n\}
+  \gamma, r \vdash di : r'  \forall i \in {1,n}
  ------------------------------------------------- ( rStar)   
  \gamma, r* \vdash d1...dn : r'*                          
 
@@ -408,11 +424,11 @@ In summary, when we perform partial derivative operation, the \gamma and the r g
 together in pairs.
 
 Hence we use the judgement
-$$\{ (\gamma_1,p_1), ..., (\gamma_n,p_n) \} \models d : \{q_1,...,q_m\} $$ 
+$${ (\gamma_1,p_1), ..., (\gamma_n,p_n) } \models d : {q_1,...,q_m} $$ 
 
 where 
-$\{ (\gamma_1,p_1), ..., (\gamma_n,p_n) \}$ are the user requirement and orginal 
-sub regex (nfa state) pairs. $\{q_1,...,q_m\}$ denotes the output set of 
+${ (\gamma_1,p_1), ..., (\gamma_n,p_n) }$ are the user requirement and orginal 
+sub regex (nfa state) pairs. ${q_1,...,q_m}$ denotes the output set of 
 refined sub regex (nfa state).
 
 
@@ -422,7 +438,7 @@ refined sub regex (nfa state).
 The algorithm correctness property (Soundness)
 
 Let $\gamma$ be the user requirement, $r$ denote the initial regular expression pattern, $d$ denote the input document
-$ \{ \gamma, r \} \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r1'|...|rn'$.
+$ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r1'|...|rn'$.
 
 
 > refine :: [(UReq, Re)] -> Doc -> [Re] 
@@ -430,13 +446,13 @@ $ \{ \gamma, r \} \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d :
 
 ```
  -------------------------------------------------------------------------------------------------- (Eps)
-  \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \models \epsilon : 
-         \{ (\gamma_i, r_i) | (\gamma_i,r_i) \in \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \wedge   
+  { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \models \epsilon : 
+         { (\gamma_i, r_i) | (\gamma_i,r_i) \in { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \wedge   
                               \epsilon \in \gamma_i (x) \forall x in \gamma_i \wedge 
-                              \epsilon \in r_i \}  ++ 
-                              (\gamma_i,r_i?) \in \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \wedge   
+                              \epsilon \in r_i }  ++ 
+                              (\gamma_i,r_i?) \in { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \wedge   
                               \epsilon \in \gamma_i (x) \forall x in \gamma_i \wedge 
-                              \epsilon \not \in r_i \}  
+                              \epsilon \not \in r_i }  
 
 ```
 
@@ -448,15 +464,15 @@ $ \{ \gamma, r \} \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d :
 >   in rAccEps ++ rNAccEpsEps
 
 ```
-   \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} / l =     \{ (\gamma_1', r_1'), ..., (\gamma_m', r_m') \}
+   { (\gamma_1, r_1), ..., (\gamma_n, r_n) } / l =     { (\gamma_1', r_1'), ..., (\gamma_m', r_m') }
    
-    \{ (\gamma_1', r_1'), ..., (\gamma_m', r_m') \} \models v : \{ q_1', ... q_k' \}
+    { (\gamma_1', r_1'), ..., (\gamma_m', r_m') } \models v : { q_1', ... q_k' }
    
-   \{ r_1, ..., r_n \} ~>_norm  \{ (l_1, \bar{r}_1), ... (l,  \bar{r} ), ...,  (l_j, \bar{r}_j) \} -- TODO: check why no need to takes in the user req? ANS: yes. no need, other monomials is not activated by the input lv.
+   { r_1, ..., r_n } ~>_norm  { (l_1, \bar{r}_1), ... (l,  \bar{r} ), ...,  (l_j, \bar{r}_j) } -- TODO: check why no need to takes in the user req? ANS: yes. no need, other monomials is not activated by the input lv.
   
-    \{ (l_1, \bar{r}_1), ... (l,  \bar{q'} ), ...,  (l_j, \bar{r}_j) \} ~>_denorm \{q_1, ..., q_h \}
+    { (l_1, \bar{r}_1), ... (l,  \bar{q'} ), ...,  (l_j, \bar{r}_j) } ~>_denorm {q_1, ..., q_h }
  -------------------------------------------------------------------------------------------------- (Norm)
-  \{ (\gamma_1, r_1), ..., (\gamma_n, r_n) \} \models (lv) : \{q_1, ..., q_h \}
+  { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \models (lv) : {q_1, ..., q_h }
 ```
 
 > refine urs (l:w) = 
