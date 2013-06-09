@@ -225,12 +225,12 @@ To elaborate, we first need to consider the extension of partial derivative oper
  ** Case: i \not\in dom(\gamma)
                     
   (\gamma, \epsilon_i) / l = {}   (Eps1) 
-  (\gamma, l_i) / l = { \epsilon_i } (LabMatch1)
+  (\gamma, l_i) / l = { (\gamma, \epsilon_i) } (LabMatch1)
   (\gamma, l_i') / l = { } (LabMisMatch1)                   
   (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
                         | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }
   (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) 
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- r / l }
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- (\gamma, r) / l }
                     
  ** Case: i \in dom(\gamma)
   (\gamma, \epsilon_i) / l = {}   (Eps2) 
@@ -239,7 +239,7 @@ To elaborate, we first need to consider the extension of partial derivative oper
   (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, |\gamma(i)/l } , (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
                         | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }
   (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l 
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- r / l }
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- (\gamma, r) / l }
                     
                     
                   
@@ -249,8 +249,8 @@ NOTE: \gamma([i1,...,in]) denotes { (i,r) | (i,r) \in \gamma, i \in { i1,..., in
 
 An immediate (naive) fix would be like the following.                   
 
-  (\gamma, \epsilon_i) / l = { \epsilon_i }   (Eps1') 
-  (\gamma, l_i') / l = { \epsilon_i } (LabMisMatch1')                   
+  (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_i) }   (Eps1') 
+  (\gamma, l_i') / l = { (\gamma, \epsilon_i) } (LabMisMatch1')                   
 
   (\gamma, \epsilon_i) / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (Eps2') 
   (\gamma, l_i') / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (LabMisMatch2')
@@ -258,32 +258,143 @@ An immediate (naive) fix would be like the following.
 
 The problem with the above adjustment is that we will end up with many unwanted refinement and the size of the regex is blown up. 
 Let's consider an example. 
-...
 
-\gamma, (a_1|b_2)_0*_3 / b = { (\gamma',(r',(a|b)*)) | (\gamma',r') <- (\gamma, (a|b)) / b }  
-
-\gamma, (a_1|b_2)_0 / b = { \epsilon, \epsilon } -- note that thanks to  (LabMisMatch1'), the first epsilon was produced by \gamma,a / b
+Example 1:
+(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(r',(a_1|b_2)_0*_3)_3) | (\gamma',r') <- (\gamma, (a_1|b_2)_0) / b }  
+because
+(\gamma, (a_1|b_2)_0) / b = { (\gamma, \epsilon_1_0), (\gamma, \epsilon_2_0) } -- note that thanks to  (LabMisMatch1'), the first epsilon was produced by \gamma,a / b
 
 As a result 
 
-\gamma, (a_1|b_2)_0*_3 / b = { (\gamma, (a|b)*), (\gamma, (a|b)*) }
+(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(\epsilon_1_0,(a_1|b_2)_0*_3)_3) , (\gamma',(\epsilon_2_0,(a_1|b_2)_0*_3)_3) }   -- (10)
 
-However, the second  (\gamma, (a|b)*) (coming from the second \epsilon) seems to be more important since it is produced by \gamma, b/b
+apply denormalization, (denorm goes by the annotation _i)
+
+there are two monomials
+the monomial is not affected by the refinement 
+(a, { (\epsilon_1_0, (a_1|b_2)_0*_3) } )
+the other monomial is affected by the refinement, derived from  (10) by removing the \gamma'
+(b, { (\epsilon_1_0,(a_1|b_2)_0*_3) , (\epsilon_2_0,(a_1|b_2)_0*_3)_3 }) 
+
+
+applying de-normalization to the above two monomials,
+
+(a, { (\epsilon_1_0, (a_1|b_2)_0*_3) } ) ~> (a_1| __ ) (a_1|b_2)_0*_3   -- we push a back to a_1, by treating "\epsilon_1_0" is the place holder for 'a'
+
+(b, { (\epsilon_1_0,(a_1|b_2)_0*_3) , (\epsilon_2_0,(a_1|b_2)_0*_3)_3 })  ~>  ( b_1 | b_2 ) (a_1|b_2)_0*_3 
+
+
+Note that the b_1 is created by an unnecessary refinement step. If we combine, we have (a_1 | b_1 | b_2) (a_1|b_2)_0*_3 , 
+
+
+the denorm will "generalize" it into a star exp ((a|b)_1 | b_2)_0*_3 which is extended unnecessary. (we will show how the
+generalization work later) \kl{maybe we should start showing how the normalization and denormalization work?
+
+The problem is how shall we get rid of b_1?
 
 
 Let's consider another example
 
 
+Example 2:
 
-({ (0 : (a|b|c)) }, (a_1|b_2)_0*_3) / c  = 
-  { (\gamma',(r',(a|b)*)) | (\gamma',r') <- ({ (0 : (a|b|c)) }, (a|b)) / c }      
+({ (1 : (a|c)) }, (a_1|b_2)_0*_3) / c  = 
+  { (\gamma',(r',(a|b)*)) | (\gamma',r') <- ({ (1 : (a|b|c)) }, (a_1|b_2)_0) / c }      
+  =                    
 
-({ (0 : (a|b|c)) }, (a_1|b_2)_0 ) / c = { \epsilon, \epsilon }
+({ (1 : (a|c)) }, (a_1|b_2)_0 ) / c = { ( { 1:\epsilon } , \epsilon_1_0), ( { } , \epsilon_2_0) }
 
-denorm {(c, { (a|b)*, (a|b)* }), (a, {(a|b)*}), (b, {(a|b)*})} = 
+hence the monomials
+(a, {(\epsilon_1_0, (a_1|b_2)_0*_3)} )    ~> (a_1_0, (a_1|b_2)_0*_3)
+(b, {(\epsilon_2_0, (a_1|b_2)_0*_3)} )    ~> (b_2_0, (a_1|b_2)_0*_3)   
+(c, {(\epsilon_1_0, (a_1|b_2)_0*_3), (\epsilon_2_0, (a_1|b_2)_0*_3)} )  ~> (c_1_0|c_2_0), (a_1|b_2)_0*_3)   
+
+Note that either c_1_0 or c_2_0 is an redundant result of refinement. So now the question is which one to removed?
+
+In this case, it seems that c_1_0 should be the one to be kept, since the user requirement { (1 : (a|c)) } suggest that 
+the c can be added under 1.
 
 
-> data URPair = URPair Recommend UReq Re deriving (Show, Eq)
+The trick is to annotate the pd with the "recommendation" info.
+
+
+Let recommendation defined as
+
+ rec :: = s | w | f
+
+where f > s > w
+
+PD of (\gamma,r) /l added with recommendation info
+
+ ** Case: i \not\in dom(\gamma)
+                    
+  (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_i, w) }   (Eps1') 
+  (\gamma, l_i) / l = { (\gamma, \epsilon_i, f) } (LabMatch1)
+  (\gamma, l_i') / l = { (\gamma, \epsilon_i, w) } (LabMisMatch1')                   
+                  
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l }
+  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) 
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i, rec) | (\gamma', r', rec) <- (\gamma, r) / l }
+                    
+ ** Case: i \in dom(\gamma)
+  (\gamma, \epsilon_i) / l = { ( \gamma-i U (i,r'), r'_i, s) | r' \in \gamma(i) / l }   (Eps2')   
+  (\gamma, l_i) / l = { ( \gamma-i U (i,r'), \epsilon_i, f) } (LabMatch2)
+  (\gamma, l_i') / l = { ( \gamma-i U (i,r'), r'_i, s) | r' \in \gamma(i) / l }   (LabMisMatch2')
+                  
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, |\gamma(i)/l } , (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l }
+  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l 
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i, rec) | (\gamma', r', rec) <- (\gamma, r) / l }
+
+
+with the recommendation info, we now re-run the above two examples.
+
+Example 1 (revisited):
+(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(r',(a_1|b_2)_0*_3)_3) | (\gamma',r',rec) <- (\gamma, (a_1|b_2)_0) / b }  
+because
+(\gamma, (a_1|b_2)_0) / b = { (\gamma, \epsilon_1_0, w), (\gamma, \epsilon_2_0, f) } 
+Since these two states are overlapping, hence the weak recommendation is removed in the presence of f
+
+The duplication is removed based on the ordering of the recommendation info
+Given { (\gamma1, r, rec_1) , (\gamma1, r, rec_2) },
+ (\gamma1, r, rec_2) is removed iff rec_2 <= rec_1
+
+
+As a result 
+
+(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(\epsilon_2_0,(a_1|b_2)_0*_3)_3) }   -- (10)
+
+The denormalization yields (a_1|b_2)_0*_3 (no refinement is required)
+
+
+
+Example 2 (revisited): 
+
+({ (1 : (a|c)) }, (a_1|b_2)_0*_3) / c  = 
+  { (\gamma',(r',(a|b)*),rec ) | (\gamma',r',rec) <- ({ (1 : (a|b|c)) }, (a_1|b_2)_0) / c }      
+  =                    
+
+({ (1 : (a|c)) }, (a_1|b_2)_0 ) / c = { ( { 1:\epsilon } , \epsilon_1_0, s), ( { } , \epsilon_2_0, w) }
+
+Again the two resulting states are overlappng, we remove the weak recommendation in the presence of the strong recommendation
+
+Thus, we have the following monomials
+(a, {(\epsilon_1_0, (a_1|b_2)_0*_3)} )    ~> (a_1_0, (a_1|b_2)_0*_3)
+(b, {(\epsilon_2_0, (a_1|b_2)_0*_3)} )    ~> (b_2_0, (a_1|b_2)_0*_3)   
+(c, {(\epsilon_1_0, (a_1|b_2)_0*_3)} )  ~> (c_1_0, (a_1|b_2)_0*_3)   
+
+the final denormalization yields 
+
+((a_1|c_1)|b_2)_0 ((a_1|b_2)_0*_3) 
+
+hence will be generalized to
+(((a_-1|c_-1)_1|b_2)_0*_3) 
+
+
+
+
+> data URPair = URPair UReq Re Recommend deriving (Show, Eq)
 
 > data Recommend = Strong | Weak | Fixed deriving (Show, Eq)
 
@@ -300,7 +411,12 @@ denorm {(c, { (a|b)*, (a|b)* }), (a, {(a|b)*}), (b, {(a|b)*})} =
 >   urPDeriv :: t -> Char -> [URPair]
 
 > instance URPDeriv URPair where
->   urPDeriv (URPair rec ureq r) = 
+>   urPDeriv (URPair ureq (Eps (i:is) rec) l
+>     | i `in` ureq = [ URPair (updateUR i r' ureq) (annotate i r') Strong
+>                        | r' <- pderiv (fromJust (lookupUR ureq i)) l  ]
+>     | otherwise   = [ URPair ureq (Eps (i:is)) Weak ]
+>   urPDeriv (URPair ureq (Ch (i:is) l) rec) l' 
+>     | i `in` ureq && l == l' = undefined
 
 partial derivative
   
