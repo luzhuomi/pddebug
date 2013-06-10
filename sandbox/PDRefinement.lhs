@@ -75,6 +75,7 @@ The Refinement checking judgement
 > import qualified Data.Map as M
 > import System.IO.Unsafe
 > import Data.List 
+> import Data.Maybe
 
 > logger io = unsafePerformIO io
 
@@ -100,6 +101,9 @@ i ::= 1,2,3,...
 
 > allAccEps :: UReq -> Bool
 > allAccEps ureq = all (\(x,t) -> posEmpty t) ureq
+
+> inUR :: Int -> UReq -> Bool
+> inUR i env = isJust (lookupUR i env) 
 
  * The Regular expression 
              
@@ -411,12 +415,24 @@ hence will be generalized to
 >   urPDeriv :: t -> Char -> [URPair]
 
 > instance URPDeriv URPair where
->   urPDeriv (URPair ureq (Eps (i:is) rec) l
->     | i `in` ureq = [ URPair (updateUR i r' ureq) (annotate i r') Strong
->                        | r' <- pderiv (fromJust (lookupUR ureq i)) l  ]
+>   urPDeriv (URPair ureq (Eps (i:is)) rec) l
+>     | i `inUR` ureq = [ URPair (updateUR i r' ureq) (annotate (i:is) r') Strong
+>                        | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
 >     | otherwise   = [ URPair ureq (Eps (i:is)) Weak ]
 >   urPDeriv (URPair ureq (Ch (i:is) l) rec) l' 
->     | i `in` ureq && l == l' = undefined
+>     | i `inUR` ureq && l == l' = [ URPair (updateUR i r' ureq) (Eps (i:is)) Fixed
+>                                   | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
+>     | i `inUR` ureq && l /= l' = [ URPair (updateUR i r' ureq) (annotate (i:is) r') Strong
+>                                    | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
+>     | not (i `inUR` ureq) && l == l' = [ URPair ureq (Eps (i:is)) Fixed ]
+>     | otherwise = [ URPair ureq (Eps (i:is)) Weak ]
+
+
+
+> instance URPDeriv t => URPDeriv [t] where
+>   urPDeriv urs l = concatMap (\ur -> urPDeriv ur l) urs -- nub?
+
+
 
 partial derivative
   
@@ -433,16 +449,24 @@ partial derivative
 
 > type Doc = [Char]
 
-> getLabel :: Re -> Maybe Int
-> getLabel (Eps x)      = Just x
-> getLabel (Choice x _) = Just x
-> getLabel (Pair x _ _) = Just x
-> getLabel (Star x _)   = Just x
-> getLabel (Ch x _)     = Just x
-> getLabel Phi          = Nothing
+> getLabel :: Re -> [Int]
+> getLabel (Eps x)      = x
+> getLabel (Choice x _) = x
+> getLabel (Pair x _ _) = x
+> getLabel (Star x _)   = x
+> getLabel (Ch x _)     = x
+> getLabel Phi          = []
 
-> dontcare = -1
+> dontcare = []
 
+
+> annotate :: [Int] -> Re -> Re
+> annotate is (Eps _) = Eps is
+> annotate is (Choice x cs) = Choice is cs
+> annotate is (Pair x r1 r2) = Pair is r1 r2
+> annotate is (Star x r) = Star is r
+> annotate is (Ch x c) = Ch is c
+> annotate is Phi = Phi
 
 
 > sigma :: Re -> String
@@ -577,7 +601,7 @@ Let $\gamma$ be the user requirement, $r$ denote the initial regular expression 
 $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r1'|...|rn'$.
 
 
-> refine :: [(UReq, Re)] -> Doc -> [Re] 
+> refine :: [URPair] -> Doc -> [Re] 
 
 
 ```
@@ -593,10 +617,10 @@ $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r
 ```
 
 > refine urs [] = 
->   let urs' = filter (\ (u,r) -> allAccEps u ) urs 
->       (urs_rAccEps, urs_rNAccEps) = partition (\ (u,r) -> posEmpty r) urs'
->       rNAccEpsEps = map (\(u,r) -> let x = topLabel r in (Choice x [r, Eps x])) urs_rNAccEps
->       rAccEps = map snd urs_rAccEps
+>   let urs' = filter (\ (URPair u r rec) -> allAccEps u ) urs 
+>       (urs_rAccEps, urs_rNAccEps) = partition (\ (URPair u r rec) -> posEmpty r) urs'
+>       rNAccEpsEps = map (\(URPair u r rec) -> let x = topLabel r in (Choice x [r, Eps x])) urs_rNAccEps
+>       rAccEps = map (\ (URPair _ r _) -> r) urs_rAccEps
 >   in rAccEps ++ rNAccEpsEps
 
 ```
@@ -612,9 +636,9 @@ $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r
 ```
 
 > refine urs (l:w) = 
->   let urs' = pderiv urs l 
+>   let urs' = urPDeriv urs l 
 >       qs'  = refine urs' w        
->       ms   = norm (map snd urs)
+>       ms   = norm (map (\ (URPair _ r _) -> r) urs)
 >       ms'  = combine ms l qs'
 >       qs   = denorm ms'
 >   in qs
@@ -623,7 +647,7 @@ $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r
 
 extracts the topmost level label
 
-> topLabel :: Re -> Int
+> topLabel :: Re -> [Int]
 > topLabel (Eps x) = x
 > topLabel (Ch x _) = x
 > topLabel (Choice x _) = x
@@ -644,7 +668,7 @@ extracts the topmost level label
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
 
                             
-> norm :: Re -> Monomials                            
+> norm :: [Re] -> Monomials                            
 > norm Phi = error "applying norm to Phi"
 > norm r | posEmpty r = WithEps x (norm' x r)
 >        | otherwise  = WithoutEps x (norm' x r)
