@@ -638,11 +638,11 @@ $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r
 > refine urs (l:w) = 
 >   let urs' = urPDeriv urs l 
 >       qs'  = refine urs' w        
->       ms   = norm (map (\ (URPair _ r _) -> r) urs)
+>       ms   = foldl (\m1 m2 -> m1 `unionLNF` m2) emptyLNF (map (\ (URPair _ r _) -> norm r) urs)  -- all the nfa states should be grouped into the same normal form, e.g. [ a, (a|b) ] ~> [a, b]
 >       ms'  = combine ms l qs'
 >       qs   = denorm ms'
 >   in qs
->   where combine :: Monomials -> Char -> [Re] -> Monomials
+>   where combine :: LNF -> Char -> [Re] -> LNF
 >         combine = undefined
 
 extracts the topmost level label
@@ -659,29 +659,35 @@ extracts the topmost level label
   $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ 
 
 
-> data Monomials = WithEps [Int] ( M.Map Char [Re] -- Maping l -> [r]
->                              , M.Map Re [Re] ) -- Mapping r* -> prefix 
->                | WithoutEps [Int] ( M.Map Char [Re] -- Mapping l -> [r]
->                                 , M.Map Re [Re] ) -- Mapping r* -> prefix
+> data LNF = WithEps [Int] ( M.Map Char [Re] -- Maping l -> [r]
+>                          , M.Map Re [Re] ) -- Mapping r* -> prefix 
+>          | WithoutEps [Int] ( M.Map Char [Re] -- Mapping l -> [r]
+>                             , M.Map Re [Re] ) -- Mapping r* -> prefix
 >           deriving Show
 
+
+> emptyLNF = WithoutEps [] (M.empty, M.empty)
+
+> unionLNF :: LNF -> LNF -> LNF 
+> unionLNF = undefined
 
 
 
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
 
-                            
-> norm :: Re -> Monomials                            
+
+> norm :: Re -> LNF                            
 > norm Phi = error "applying norm to Phi"
 > norm r | posEmpty r = WithEps x (norm' x r)
 >        | otherwise  = WithoutEps x (norm' x r)
->    where x = getLabel r
+>   where x = getLabel r
+              
 
 norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
 
 > norm' :: [Int] -> Re -> (M.Map Char [Re], M.Map Re [Re])
-> norm' x r = let ms = [ (l, pderiv r l) | l <- sigma r ]
->             in (M.fromList ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (tail_ r, Pair x (Ch x l) (init_ r))) ms))
+> norm' x r = let ms = [ (l, r') | l <- sigma r, r' <- pderiv r l ]
+>             in (foldl (\m (l,r) -> upsert l [r] (++) m) M.empty ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (tail_ r, Pair x (Ch x l) (init_ r))) ms))
 
 tail_ returns the right most re in a sequence of Re
 
@@ -696,7 +702,7 @@ tail_ returns the right most re in a sequence of Re
 
 append_ appends two Re(s) by sequence
 
-> append_ :: Int -> Re -> Re -> Re
+> append_ :: [Int] -> Re -> Re -> Re
 > append_ _ (Pair y r1 r2) r3 = Pair y r1 (append_ y r2 r3)
 > append_ x r1 r2 = Pair x r1 r2
 
@@ -705,37 +711,34 @@ append_ appends two Re(s) by sequence
 >                  { Just v' -> M.adjust (\_ -> f v' v) k m 
 >                  ; Nothing -> M.insert k v m }
 
-> lookupMN :: Char -> Monomials -> Maybe Re
+> lookupMN :: Char -> LNF -> Maybe [Re]
+
 > lookupMN c (WithEps x (m1,m2)) = M.lookup c m1
 > lookupMN c (WithoutEps x (m1,m2)) = M.lookup c m1
 
-> updateMN :: Char -> Re -> Monomials -> Monomials
-> updateMN c r (WithEps x (m1,m2)) = 
->    let r' = tail_ r   -- the tail
->        r'' = Pair x (Ch x c) (init_ r) -- the label + the prefix
->    in WithEps x (M.adjust (\_ -> r) c m1, upsert r' [r''] (++) m2)  -- the subfix r' might not be in m2
-> updateMN c r (WithoutEps x (m1,m2)) = 
->    let r' = tail_ r   
->        r'' = Pair x (Ch x c) (init_ r)
->    in WithoutEps x (M.adjust (\_ -> r) c m1, upsert r' [r''] (++) m2) 
+> updateMN :: Char -> [Re] -> LNF -> LNF
+> updateMN c rs (WithEps x (m1,m2)) = 
+>    let ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
+>    in WithEps x (M.adjust (\_ -> rs) c m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)  -- the subfix r' might not be in m2
+> updateMN c rs (WithoutEps x (m1,m2)) = 
+>    let  ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
+>    in WithoutEps x (M.adjust (\_ -> rs) c m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)  -- the subfix r' might not be in m2
 
-> insertMN :: Char -> Re -> Monomials -> Monomials
-> insertMN c r (WithEps x (m1,m2)) = 
->    let r' = tail_ r   
->        r'' = Pair x (Ch x c) (init_ r)  
->    in WithEps x (M.insert c r m1, upsert r' [r''] (++) m2) 
-> insertMN c r (WithoutEps x (m1,m2)) = 
->    let r' = tail_ r   
->        r'' = Pair x (Ch x c) (init_ r)
->    in WithoutEps x (M.insert c r m1, upsert r' [r''] (++) m2) 
+> insertMN :: Char -> [Re] -> LNF -> LNF
+> insertMN c rs (WithEps x (m1,m2)) = 
+>    let ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
+>    in WithEps x (M.insert c rs m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps) 
+> insertMN c rs (WithoutEps x (m1,m2)) = 
+>    let ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
+>    in WithoutEps x (M.insert c rs m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)
 
-> singleton :: Int -> Doc -> Re 
+> singleton :: [Int] -> Doc -> Re 
 > singleton x cs = foldr (\l r -> Pair x (Ch x l) r) (Eps x) cs
 
 
 return a choice if the list is non-singleton
 
-> mkChoice :: Int -> [Re] -> Re 
+> mkChoice :: [Int] -> [Re] -> Re 
 > mkChoice x [r] = r
 > mkChoice x rs = Choice x rs
 
@@ -746,17 +749,17 @@ denorm \bar{m} = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar
                  in [ (mkPlus plus) | plus <- pluses ]  ++ nonpluses
 
 
-> denorm :: Monomials -> Re
+> denorm :: LNF -> [Re]
 > denorm (WithEps x (m1,m2)) = 
 >    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
 >        ps = map mkStar (M.toList plusMonoGrp)         
 >        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
->    in simpFix $ mkChoice x (ps ++ nps)
+>    in (ps ++ nps)
 > denorm (WithoutEps x (m1,m2)) = 
 >    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
 >        ps = map mkPlus (M.toList plusMonoGrp)         
 >        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
->    in simpFix $ mkChoice x (ps ++ nps)
+>    in (ps ++ nps)
 
 
 > mkStar :: (Re, [Re]) -> Re
@@ -813,11 +816,11 @@ mkPlus ms = let fs = map fst ms
                           
 r1 = (A|B)*
 
-> r1 = Star 1 (Choice 2 [Ch 3 'A', Ch 4 'B'])
+> r1 = Star [1] (Choice [2] [Ch [3] 'A', Ch [4] 'B'])
 
 r2 = (A|B|C)*
 
-> r2 = Star 1 (Choice 2 [Ch 3 'A'])
+> r2 = Star [1] (Choice [2] [Ch [3] 'A'])
 
 r3 = .+
 
