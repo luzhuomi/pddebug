@@ -659,25 +659,28 @@ extracts the topmost level label
   $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ 
 
 
-> data Monomials = WithEps Int ( M.Map Char Re -- Maping l -> r
->                              , M.Map Re [Re] ) -- Mapping grouped by common trailing kleene's star expression
->                | WithoutEps Int ( M.Map Char Re -- Mapping l -> r
->                                 , M.Map Re [Re] ) -- Mapping r -> ls
+> data Monomials = WithEps [Int] ( M.Map Char [Re] -- Maping l -> [r]
+>                              , M.Map Re [Re] ) -- Mapping r* -> prefix 
+>                | WithoutEps [Int] ( M.Map Char [Re] -- Mapping l -> [r]
+>                                 , M.Map Re [Re] ) -- Mapping r* -> prefix
 >           deriving Show
+
+
+
 
 norm r = if () \in r then (norm' r) | ()  else (norm' r)
 
                             
-> norm :: [Re] -> Monomials                            
+> norm :: Re -> Monomials                            
 > norm Phi = error "applying norm to Phi"
 > norm r | posEmpty r = WithEps x (norm' x r)
 >        | otherwise  = WithoutEps x (norm' x r)
->    where Just x = getLabel r
+>    where x = getLabel r
 
 norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
 
-> norm' :: Int -> Re -> (M.Map Char Re, M.Map Re [Re])
-> norm' x r = let ms = [ (l, deriv r l) | l <- sigma r ]
+> norm' :: [Int] -> Re -> (M.Map Char [Re], M.Map Re [Re])
+> norm' x r = let ms = [ (l, pderiv r l) | l <- sigma r ]
 >             in (M.fromList ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (tail_ r, Pair x (Ch x l) (init_ r))) ms))
 
 tail_ returns the right most re in a sequence of Re
