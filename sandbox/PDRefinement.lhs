@@ -656,14 +656,30 @@ extracts the topmost level label
 > topLabel Phi = dontcare
 
 
-  $p \norm m1 | ... | mn$ and $ m1 | ... | mn \denorm p$ 
+normalization
+  $p \norm m1 | ... | mn$  
+                 
+     where m_i denotes the monomial of shape (l_i, [r1,...,rn])
 
+de-normalization
+  $ m1 | ... | mn \denorm p$ 
+
+    
+
+The linear normal form
+
+
+lnf ::= { (l1,\bar{r1}), ... , (ln, \bar{rn}) } U {\eps}  ||
+        { (l1,\bar{r1}), ... , (ln, \bar{rn}) } 
 
 > data LNF = WithEps [Int] ( M.Map Char [Re] -- Maping l -> [r]
 >                          , M.Map Re [Re] ) -- Mapping r* -> prefix 
 >          | WithoutEps [Int] ( M.Map Char [Re] -- Mapping l -> [r]
 >                             , M.Map Re [Re] ) -- Mapping r* -> prefix
 >           deriving Show
+
+what is in addition is the dictionary that maps the trailing r* back to the prefix for all the monomials. It will be used to 
+denormalization
 
 
 > emptyLNF = WithoutEps [] (M.empty, M.empty)
@@ -673,8 +689,7 @@ extracts the topmost level label
 
 
 
-norm r = if () \in r then (norm' r) | ()  else (norm' r)
-
+norm r = if () \in r then (norm' r) ++ { () }  else (norm' r)
 
 > norm :: Re -> LNF                            
 > norm Phi = error "applying norm to Phi"
@@ -683,17 +698,17 @@ norm r = if () \in r then (norm' r) | ()  else (norm' r)
 >   where x = getLabel r
               
 
-norm' r = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
+norm' r = groupBy (eq . last) [(l, r') | l \in \sigma(r), r' \in pderiv r l]
 
 > norm' :: [Int] -> Re -> (M.Map Char [Re], M.Map Re [Re])
 > norm' x r = let ms = [ (l, r') | l <- sigma r, r' <- pderiv r l ]
->             in (foldl (\m (l,r) -> upsert l [r] (++) m) M.empty ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (tail_ r, Pair x (Ch x l) (init_ r))) ms))
+>             in (foldl (\m (l,r) -> upsert l [r] (++) m) M.empty ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (last_ r, Pair x (Ch x l) (init_ r))) ms))
 
-tail_ returns the right most re in a sequence of Re
+last_ returns the right most re in a sequence of Re
 
-> tail_ :: Re -> Re 
-> tail_ (Pair x r1 r2) = tail_ r2
-> tail_ r = r
+> last_ :: Re -> Re 
+> last_ (Pair x r1 r2) = last_ r2
+> last_ r = r
 
 > init_ :: Re -> Re
 > init_ (Pair x r1 r2) = let r2' = (init_ r2)
