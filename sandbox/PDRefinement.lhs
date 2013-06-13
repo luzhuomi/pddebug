@@ -664,6 +664,12 @@ normalization
 de-normalization
   $ m1 | ... | mn \denorm p$ 
 
+
+1) l, \epsilon_i r -> li r
+2) { r1 r, r2 r } => (r1|r2) r
+3)  r_i (r'_i)*_j and r_i \subseteq r_i' ->    r_i*_j    () \in lnf 
+                       ^^^^^^^^^^^^^^^^^^      r_i+_j    otherwise    this one or directly update the l_i to (l|l')_i? for all location of i in r?
+4) (r*|\epsilon) r' -> r* r'                 
     
 
 The linear normal form
