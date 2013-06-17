@@ -73,6 +73,7 @@ The Refinement checking judgement
 > module Main where
 
 > import qualified Data.Map as M
+> import qualified Data.IntMap as IM
 > import System.IO.Unsafe
 > import Data.List 
 > import Data.Maybe
@@ -396,7 +397,7 @@ hence will be generalized to
 (((a_-1|c_-1)_1|b_2)_0*_3) 
 
 
-
+> {- 
 
 > data URPair = URPair UReq Re Recommend deriving (Show, Eq)
 
@@ -426,12 +427,13 @@ hence will be generalized to
 >                                    | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
 >     | not (i `inUR` ureq) && l == l' = [ URPair ureq (Eps (i:is)) Fixed ]
 >     | otherwise = [ URPair ureq (Eps (i:is)) Weak ]
-
+>   urPDeriv = undefined -- TODO
 
 
 > instance URPDeriv t => URPDeriv [t] where
 >   urPDeriv urs l = concatMap (\ur -> urPDeriv ur l) urs -- nub?
 
+> -}
 
 
 partial derivative
@@ -601,6 +603,8 @@ Let $\gamma$ be the user requirement, $r$ denote the initial regular expression 
 $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r1'|...|rn'$.
 
 
+> {-
+
 > refine :: [URPair] -> Doc -> [Re] 
 
 
@@ -647,6 +651,8 @@ $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r
 
 extracts the topmost level label
 
+> -}
+
 > topLabel :: Re -> [Int]
 > topLabel (Eps x) = x
 > topLabel (Ch x _) = x
@@ -668,7 +674,7 @@ de-normalization
 1) l, \epsilon_i r -> li r
 2) { r1 r, r2 r } => (r1|r2) r
 3)  r_i (r'_i)*_j and r_i \subseteq r_i' ->    r_i*_j    () \in lnf 
-                       ^^^^^^^^^^^^^^^^^^      r_i+_j    otherwise    this one or directly update the l_i to (l|l')_i? for all location of i in r?
+                       ^^^^^^^^^^^^^^^^^^      r_i+_j    otherwise    -- this or directly update the l_i to (l|l')_i? for all location of i in r?
 4) (r*|\epsilon) r' -> r* r'                 
     
 
@@ -739,18 +745,18 @@ append_ appends two Re(s) by sequence
 
 > updateMN :: Char -> [Re] -> LNF -> LNF
 > updateMN c rs (WithEps x (m1,m2)) = 
->    let ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
+>    let ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
 >    in WithEps x (M.adjust (\_ -> rs) c m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)  -- the subfix r' might not be in m2
 > updateMN c rs (WithoutEps x (m1,m2)) = 
->    let  ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
+>    let  ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
 >    in WithoutEps x (M.adjust (\_ -> rs) c m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)  -- the subfix r' might not be in m2
 
 > insertMN :: Char -> [Re] -> LNF -> LNF
 > insertMN c rs (WithEps x (m1,m2)) = 
->    let ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
+>    let ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
 >    in WithEps x (M.insert c rs m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps) 
 > insertMN c rs (WithoutEps x (m1,m2)) = 
->    let ps = map (\r -> (tail_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
+>    let ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
 >    in WithoutEps x (M.insert c rs m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)
 
 > singleton :: [Int] -> Doc -> Re 
@@ -852,3 +858,182 @@ r3 = .+
 > v = "ABC"
 
 > g = [(1::Int, r3)]
+
+
+
+New idea: refinement algo takes ureq re pair and the input words returns a set of 
+
+```
+----------------------------------------------------------------------------------------------------------------------------------- (Eps)
+\overline{ \gamma, r, \Psi } |=  \epsilon: { \Psi | (\gamma, r, \Psi) \in \overline{ \gamma, r, \Psi }, \epsilon \in \Psi(r)  } ++ 
+                                           { \Psi . (i -> +\epsilon, s) } | (\gamma, r, \Psi) \in  \overline{ \gamma, r, \Psi } }
+      
+      
+      
+\overline{ \gamma, r, \Psi } / l = \overline { \gamma', r', \Psi' } 
+\overline { \gamma', r', \Psi o \Psi'  } |= w: \overline {\Psi''} 
+----------------------------------------------------------------------------------------------------------------------------------- (Ind)
+\overline{ \gamma, r, \Psi } |=  lw : {\Psi''}
+      
+```
+
+Note that from (Ind) the refinement environment \Psi is passed along
+
+
+> type REnv = IM.IntMap [ROp]
+
+> data ROp = RAdd Re RLevel 
+>           deriving (Eq,Show)
+
+
+
+
+> data RLevel = Fixed | Strong | Weak deriving (Ord, Eq, Show)
+
+> ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
+> ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply` r) ] ++ 
+>              [ extend renv (getLabel r) (RAdd (Eps dontcare) Strong)
+>                     | (ureq, r, renv) <- urs
+>                     , not (posEmpty (renv `apply` r))
+>                     , any (\i -> case lookupUR i ureq of
+>                                  { Nothing -> False
+>                                  ; Just t  -> posEmpty t }) (getLabel r) ]
+> ref urs (l:w) = let urs' = concatMap (\ (ur,r,renv) -> 
+>                                     let urs'' = urePDeriv (ur, r, renv) l
+>                                     in  map (\(ur', r', renv') -> (ur', r',  combine renv renv')) urs'') urs
+>                 in ref urs' w
+
+
+
+
+> urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
+> urePDeriv (ur, r, psi) l = urPDeriv (ur,psi `apply` r) l
+
+
+> urPDeriv :: (UReq, Re) -> Char -> [(UReq, Re, REnv)]
+> urPDeriv (ur, Eps (i:is)) l 
+>   | i `inUR` ur = [ ((updateUR i r' ur), (annotate (i:is) r'), IM.singleton i [RAdd r Strong]) 
+>                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
+>   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RAdd (Ch dontcare l) Weak]) ]
+> urPDeriv (ur, (Ch (i:is) l)) l' = 
+>   case lookup i ur of 
+>     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
+>                            | r' <- pderiv r l ]
+>              | l /= l' -> [ ((updateUR i r' ur), (annotate (i:is) r'), IM.singleton i [RAdd r Strong]) | r' <- pderiv r l]
+>     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch dontcare l') Weak] ) ] 
+>     }
+> urPDeriv (ur, Pair (i:is) r1 r2) l =
+>    case lookup i ur of 
+>     { Just r | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare (pderiv r l))]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] ++ (urPDeriv (ur `limit` (fv r2), r2) l)
+>              | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare (pderiv r l))]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] 
+>     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l ] ++ (urPDeriv (ur `limit` (fv r2), r2) l)
+>               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l ]
+>     }
+> urPDeriv (ur, Choice (i:is) rs) l = 
+>    case lookup i ur of
+>      { Just p ->  
+>          case pderiv p l of
+>          { [] -> []
+>          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
+>                  in concatMap (\ r -> urPDerivS (ur', r) l) rs -- todo:move i:is to each r
+>          }
+>      ; Nothing -> concatMap (\ r -> urPDeriv (ur, r) l) rs 
+>      }
+> urPDeriv (ur, Star (i:is) r) l = 
+>     case lookup i ur of 
+>       { Just p -> 
+>          case pderiv p l of
+>          { [] -> []
+>          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
+>                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
+>                        | (ur'', r', renv) <- urPDerivS (ur',r) l ]
+>          }
+>       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
+>                        | (ur', r', renv) <- urPDeriv (ur,r) l ]
+>       }
+> urPDeriv ur _ = error $ "unhandled input: " ++ (show ur)
+
+
+urPDeriv with Strong recommendation
+
+> urPDerivS :: (UReq, Re) -> Char -> [(UReq, Re, REnv)]
+> urPDerivS (ur, Eps (i:is)) l 
+>   | i `inUR` ur = [ ((updateUR i r' ur), (annotate (i:is) r'), IM.singleton i [RAdd r Strong]) 
+>                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
+>   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RAdd (Ch dontcare l) Strong]) ]
+> urPDerivS (ur, (Ch (i:is) l)) l' = 
+>   case lookup i ur of 
+>     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
+>                            | r' <- pderiv r l ]
+>              | l /= l' -> [ ((updateUR i r' ur), (annotate (i:is) r'), IM.singleton i [RAdd r Strong]) | r' <- pderiv r l]
+>     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch dontcare l') Strong] ) ] 
+>     }
+> urPDerivS (ur, Pair (i:is) r1 r2) l =
+>    case lookup i ur of 
+>     { Just r | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare (pderiv r l))]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] ++ (urPDerivS (ur `limit` (fv r2), r2) l)
+>              | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare (pderiv r l))]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] 
+>     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] ++ (urPDerivS (ur `limit` (fv r2), r2) l)
+>               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ]
+>     }
+> urPDerivS (ur, Choice (i:is) rs) l = 
+>    concatMap (\ r -> urPDerivS (ur, r) l) rs -- todo:move i:is to each r
+> urPDerivS (ur, Star (i:is) r) l = 
+>    [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  -- todo: update i in ur?
+>      | (ur', r', renv) <- urPDerivS (ur,r) l ]
+> urPDerivS ur _ = error $ "unhandled input: " ++ (show ur)
+
+
+
+return all labels annotation of a re
+
+> fv :: Re -> [Int]
+> fv (Eps is) = is
+> fv (Ch is _) = is
+> fv (Pair is r1 r2) = is ++ fv r1 ++ fv r2
+> fv (Choice is rs)  = is ++ concatMap fv rs
+> fv (Star is r) = is ++ fv r
+> fv _ = []
+
+
+retrict the user req based on a set of labels
+
+> limit :: UReq -> [Int] -> UReq
+> limit ur is = filter (\(i,_) -> i `elem` is) ur
+
+
+``` 
+
+
+```
+
+applying REnv to a Re
+
+
+> apply :: REnv -> Re -> Re 
+> apply renv r = let (i:is) = getLabel r -- The first one is always the orginal label annotated to the regexp. The tail could contain those being collapsed because of pderiv op
+>                in case IM.lookup i renv of 
+>                    { Just rs -> let r' = apply' renv r
+>                                         in Choice (i:is) (r':(map (\(RAdd t _) -> annotate (i:is) t) rs))
+>                    ; Nothing -> apply' renv r
+>                    }
+
+> apply' :: REnv -> Re -> Re
+> apply' renv (Pair is r1 r2) = Pair is (apply renv r1) (apply renv r2)
+> apply' renv (Choice is rs) = Choice is (map (apply renv) rs)
+> apply' renv (Star is r) = Star is (apply renv r)
+> apply' _ r = r
+
+
+> combine :: REnv -> REnv -> REnv 
+> combine renv1 renv2 = IM.unionWith (\x y -> nub (x ++ y)) renv1 renv2 
+
+> extend :: REnv -> [Int] -> ROp -> REnv
+> extend renv [] _ = renv
+> extend renv (i:_) e@(RAdd r lvl) = -- we only care about the original label
+>      case IM.lookup i renv of 
+>       { Just rs | not (e `elem` rs) ->  IM.adjust (\_ -> rs++[RAdd r lvl]) i renv 
+>                 | otherwise -> renv
+>       ; Nothing -> IM.insert i [RAdd r lvl] renv
+>       }
