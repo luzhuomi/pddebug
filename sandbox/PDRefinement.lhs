@@ -778,7 +778,7 @@ count the number of ROps in renv
 >       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
 >                        | (ur', r', renv) <- urPDeriv (ur,r) l ]
 >       }
-> urPDeriv ur _ = error $ "unhandled input: " ++ (show ur)
+> urPDeriv ur c = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
 
 
 urPDeriv with Strong recommendation
@@ -829,7 +829,7 @@ urPDeriv with Strong recommendation
 >       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
 >                        | (ur', r', renv) <- urPDerivS (ur,r) l ]
 >       }
-> urPDerivS ur _ = error $ "unhandled input: " ++ (show ur)
+> urPDerivS ur c = error $ "unhandled input: " ++ (show ur)  ++ "/" ++ (show c)
 
 
 
@@ -881,7 +881,7 @@ applying REnv to a Re
 > app :: Re -> [Re] -> Re
 > app r [] = r
 > app r (t:ts) = let is = getLabel r 
->                in app (Pair is r t) ts
+>                in app (Pair is r (annotate is t)) ts
 
 
 > combine :: REnv -> REnv -> REnv 
