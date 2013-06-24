@@ -656,6 +656,7 @@ Note that from (Ind) the refinement environment \Psi is passed along
 > type REnv = IM.IntMap [ROp]
 
 > data ROp = RAdd Re RLevel 
+>          | RApp Re RLevel
 >           deriving (Eq,Show)
 
 
@@ -684,10 +685,23 @@ count the number of ROps in renv
 > isStrong :: ROp -> Bool
 > isStrong (RAdd _ Strong) = True                         
 > isStrong (RAdd _ _) = False
+> isStrong (RApp _ Strong) = True                         
+> isStrong (RApp _ _) = False
+
 
 > isWeak :: ROp -> Bool
 > isWeak (RAdd _ Weak) = True                         
 > isWeak (RAdd _ _) = False
+> isWeak (RApp _ Weak) = True                         
+> isWeak (RApp _ _) = False
+
+> isRAdd :: ROp -> Bool
+> isRAdd (RAdd _ _) = True
+> isRAdd _ = False
+
+> isRApp :: ROp -> Bool
+> isRApp (RApp _ _) = True
+> isRApp _ = False
 
                        
                        
@@ -720,9 +734,9 @@ count the number of ROps in renv
 
 > urPDeriv :: (UReq, Re) -> Char -> [(UReq, Re, REnv)]
 > urPDeriv (ur, Eps (i:is)) l 
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps (i:is), IM.singleton i [RAdd (Ch dontcare l) Strong]) 
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps (i:is), IM.singleton i [RApp (Ch dontcare l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RAdd (Ch dontcare l) Weak]) ]
+>   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RApp (Ch dontcare l) Weak]) ]
 > urPDeriv (ur, (Ch (i:is) l)) l' = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
@@ -771,9 +785,9 @@ urPDeriv with Strong recommendation
 
 > urPDerivS :: (UReq, Re) -> Char -> [(UReq, Re, REnv)]
 > urPDerivS (ur, Eps (i:is)) l 
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps (i:is), IM.singleton i [RAdd (Ch dontcare l) Strong]) 
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps (i:is), IM.singleton i [RApp (Ch dontcare l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RAdd (Ch dontcare l) Strong]) ]
+>   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RApp (Ch dontcare l) Strong]) ]
 > urPDerivS (ur, (Ch (i:is) l)) l' = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
@@ -849,7 +863,10 @@ applying REnv to a Re
 >                {  (i:is) -> -- The first one is always the orginal label annotated to the regexp. The tail could contain those being collapsed because of pderiv op
 >                  case IM.lookup i renv of 
 >                    { Just rs -> let r' = apply' renv r
->                                 in Choice (i:is) (r':(map (\(RAdd t _) -> annotate (i:is) t) rs))
+>                                     adds = map (\ (RAdd t _ ) -> t) $ filter isRAdd rs
+>                                     apps = map (\ (RApp t _ ) -> t) $ filter isRApp rs
+>                                     r''  = app r' apps 
+>                                 in Choice (i:is) (r'':(map (\t -> annotate (i:is) t) adds))
 >                    ; Nothing -> apply' renv r
 >                    }
 >                ; [] -> error ("apply: getLabel is applied to a regular ex which has no label. " ++ (show r))
@@ -860,6 +877,11 @@ applying REnv to a Re
 > apply' renv (Choice is rs) = Choice is (map (apply renv) rs)
 > apply' renv (Star is r) = Star is (apply renv r)
 > apply' _ r = r
+
+> app :: Re -> [Re] -> Re
+> app r [] = r
+> app r (t:ts) = let is = getLabel r 
+>                in app (Pair is r t) ts
 
 
 > combine :: REnv -> REnv -> REnv 
