@@ -451,6 +451,16 @@ partial derivative
 
 > type Doc = [Char]
 
+> getLabels :: Re -> [Int]
+> getLabels (Eps x)      = x
+> getLabels (Choice x rs) = x ++ concatMap getLabels rs
+> getLabels (Pair x r1 r2) = x ++ (getLabels r1) ++ (getLabels r2)
+> getLabels (Star x r)   = x ++ (getLabels r)
+> getLabels (Ch x _)     = x
+> getLabels Phi          = []
+
+
+
 > getLabel :: Re -> [Int]
 > getLabel (Eps x)      = x
 > getLabel (Choice x _) = x
@@ -667,7 +677,11 @@ Note that from (Ind) the refinement environment \Psi is passed along
 >   in case compare s1 s2 of 
 >       EQ -> let w1 = renvWeak r1
 >                 w2 = renvWeak r2
->             in compare w1 w2
+>             in case compare w1 w2 of
+>                EQ -> let a1 = renvRApp r1
+>                          a2 = renvRApp r2
+>                      in compare a1 a2
+>                _ -> compare w1 w2
 >       _  -> compare s1 s2
 
 count the number of ROps in renv
@@ -680,6 +694,10 @@ count the number of ROps in renv
 
 > renvWeak :: REnv -> Int
 > renvWeak renv = sum (map (\ (k,v) -> length (filter isWeak v)) (IM.toList renv))
+
+> renvRApp :: REnv -> Int
+> renvRApp renv = sum (map (\ (k,v) -> length (filter isRApp v)) (IM.toList renv))
+
                          
                          
 > isStrong :: ROp -> Bool
@@ -729,107 +747,109 @@ count the number of ROps in renv
 
 
 > urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
-> urePDeriv (ur, r, psi) l = urPDeriv (ur,psi `apply` r) l
+> urePDeriv (ur, r, psi) l = let max_i = maximum $ getLabels (psi `apply` r)
+>                            in urPDeriv (ur,psi `apply` r) l (max_i + 1)
 
 
-> urPDeriv :: (UReq, Re) -> Char -> [(UReq, Re, REnv)]
-> urPDeriv (ur, Eps (i:is)) l 
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps (i:is), IM.singleton i [RApp (Ch dontcare l) Strong]) 
+
+> urPDeriv :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
+> urPDeriv (ur, Eps (i:is)) l next_i
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RApp (Ch dontcare l) Weak]) ]
-> urPDeriv (ur, (Ch (i:is) l)) l' = 
+>   | otherwise   = [ (ur, Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Weak]) ]
+> urPDeriv (ur, (Ch (i:is) l)) l' next_i = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
 >                            | r' <- pderiv r l ]
->              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch dontcare l') Strong]) | r' <- pderiv r l]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [next_i] l') Strong]) | r' <- pderiv r l]
 >     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
->               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch dontcare l') Weak] ) ] 
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [next_i] l') Weak] ) ] 
 >     }
-> urPDeriv (ur, Pair (i:is) r1 r2) l =
+> urPDeriv (ur, Pair (i:is) r1 r2) l next_i =
 >    case lookup i ur of 
 >     { Just p -> 
 >         case pderiv p l of
 >           { [] -> [] 
->           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] ++ (urPDerivS (ur `limit` (fv r2), r2) l)
->                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] 
+>           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i ] ++ (urPDerivS (ur `limit` (fv r2), r2) l next_i)
+>                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i] 
 >           }
->     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l ] ++ (urPDeriv (ur `limit` (fv r2), r2) l)
->               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l ]
+>     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l next_i ] ++ (urPDeriv (ur `limit` (fv r2), r2) l next_i)
+>               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l next_i ]
 >     }
-> urPDeriv (ur, Choice (i:is) rs) l = 
+> urPDeriv (ur, Choice (i:is) rs) l next_i = 
 >    case lookup i ur of
 >      { Just p ->  
 >          case pderiv p l of
 >          { [] -> []
 >          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
->                  in concatMap (\ r -> urPDerivS (ur', r) l) rs -- todo:move i:is to each r
+>                  in concatMap (\ r -> urPDerivS (ur', r) l next_i) rs -- todo:move i:is to each r
 >          }
->      ; Nothing -> concatMap (\ r -> urPDeriv (ur, r) l) rs 
+>      ; Nothing -> concatMap (\ r -> urPDeriv (ur, r) l next_i) rs 
 >      }
-> urPDeriv (ur, Star (i:is) r) l = 
+> urPDeriv (ur, Star (i:is) r) l next_i = 
 >     case lookup i ur of 
 >       { Just p -> 
 >          case pderiv p l of
 >          { [] -> []
 >          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
 >                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur'', r', renv) <- urPDerivS (ur',r) l ]
+>                        | (ur'', r', renv) <- urPDerivS (ur',r) l next_i ]
 >          }
 >       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur', r', renv) <- urPDeriv (ur,r) l ]
+>                        | (ur', r', renv) <- urPDeriv (ur,r) l next_i ]
 >       }
-> urPDeriv ur c = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
+> urPDeriv ur c next_i = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
 
 
 urPDeriv with Strong recommendation
 
-> urPDerivS :: (UReq, Re) -> Char -> [(UReq, Re, REnv)]
-> urPDerivS (ur, Eps (i:is)) l 
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps (i:is), IM.singleton i [RApp (Ch dontcare l) Strong]) 
+> urPDerivS :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
+> urPDerivS (ur, Eps (i:is)) l next_i
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [ next_i] l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, (Eps (i:is)), IM.singleton i [RApp (Ch dontcare l) Strong]) ]
-> urPDerivS (ur, (Ch (i:is) l)) l' = 
+>   | otherwise   = [ (ur, (Eps [next_i]), IM.singleton i [RApp (Ch [ next_i] l) Strong]) ]
+> urPDerivS (ur, (Ch (i:is) l)) l'  next_i = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
 >                            | r' <- pderiv r l ]
->              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch dontcare l') Strong]) | r' <- pderiv r l]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [ next_i] l') Strong]) | r' <- pderiv r l]
 >     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
->               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch dontcare l') Strong] ) ] 
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [ next_i] l') Strong] ) ] 
 >     }
-> urPDerivS (ur, Pair (i:is) r1 r2) l =
+> urPDerivS (ur, Pair (i:is) r1 r2) l  next_i =
 >    case lookup i ur of 
 >     { Just p -> 
 >         case pderiv p l of
 >           { [] -> [] 
->           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] ++ (urPDerivS (ur `limit` (fv r2), r2) l)
->                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] 
+>           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i ] ++ (urPDerivS (ur `limit` (fv r2), r2) l next_i)
+>                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i ] 
 >           }
->     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ] ++ (urPDerivS (ur `limit` (fv r2), r2) l)
->               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l ]
+>     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i] ++ (urPDerivS (ur `limit` (fv r2), r2) l next_i)
+>               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i]
 >     }
-> urPDerivS (ur, Choice (i:is) rs) l = 
+> urPDerivS (ur, Choice (i:is) rs) l next_i = 
 >    case lookup i ur of
 >      { Just p ->  
 >          case pderiv p l of
 >          { [] -> []
 >          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
->                  in concatMap (\ r -> urPDerivS (ur', r) l) rs -- todo:move i:is to each r
+>                  in concatMap (\ r -> urPDerivS (ur', r) l next_i) rs -- todo:move i:is to each r
 >          }
->      ; Nothing -> concatMap (\ r -> urPDerivS (ur, r) l) rs 
+>      ; Nothing -> concatMap (\ r -> urPDerivS (ur, r) l next_i) rs 
 >      }
-> urPDerivS (ur, Star (i:is) r) l = 
+> urPDerivS (ur, Star (i:is) r) l next_i = 
 >     case lookup i ur of 
 >       { Just p -> 
 >          case pderiv p l of
 >          { [] -> []
 >          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
 >                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur'', r', renv) <- urPDerivS (ur',r) l ]
+>                        | (ur'', r', renv) <- urPDerivS (ur',r) l next_i]
 >          }
 >       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur', r', renv) <- urPDerivS (ur,r) l ]
+>                        | (ur', r', renv) <- urPDerivS (ur,r) l next_i]
 >       }
-> urPDerivS ur c = error $ "unhandled input: " ++ (show ur)  ++ "/" ++ (show c)
+> urPDerivS ur c next_i = error $ "unhandled input: " ++ (show ur)  ++ "/" ++ (show c)
 
 
 
@@ -864,9 +884,11 @@ applying REnv to a Re
 >                  case IM.lookup i renv of 
 >                    { Just rs -> let r' = apply' renv r
 >                                     adds = map (\ (RAdd t _ ) -> t) $ filter isRAdd rs
->                                     apps = map (\ (RApp t _ ) -> t) $ filter isRApp rs
+>                                     apps = map (\ (RApp t _ ) -> apply renv t) $ filter isRApp rs
 >                                     r''  = app r' apps 
->                                 in Choice (i:is) (r'':(map (\t -> annotate (i:is) t) adds))
+>                                 in case adds of 
+>                                    { (_:_) -> Choice (i:is) (r'':(map (\t -> annotate (i:is) t) adds))
+>                                    ; [] -> r'' }
 >                    ; Nothing -> apply' renv r
 >                    }
 >                ; [] -> error ("apply: getLabel is applied to a regular ex which has no label. " ++ (show r))
