@@ -251,15 +251,35 @@ To elaborate, we first need to consider the extension of partial derivative oper
 NOTE: \gamma([i1,...,in]) denotes { (i,r) | (i,r) \in \gamma, i \in { i1,..., in } }                  
                
   The above formulation does not refine in case of failure, i.e. pd yields { }. See cases (Eps1), (Eps2), (LabMistMach1) and (LabMistMach2).
+                  
 
-An immediate (naive) fix would be like the following.                   
+e.g. given p = x :: (a|b)*  and w = c, matching w with p using partial derivative operation
+ 
+                  p / c = {} 
+                  
+                  whichis a matching failure
+                  
+ This is because p / c -->                   
+                 { (r, p) | r <- (a|b) /c }
+     and                  
+                 (a|c) / c -->
+                 a/c U b/c -->
+                  {} U {}  --> 
+                     {}
+                  
+Suppose the user requirement specifically require x to match with a non-empty word e.g. { x :: .+ }, note . matches with any single character
+
+One naive to fix it is to just update p by replacing (a|b)* with .+, however this is often too liberal, because the user requirement could be specified loosely.
+
+An immediate (less naive) fix would be like the following.                   
 
   (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_i) }   (Eps1') 
   (\gamma, l_i') / l = { (\gamma, \epsilon_i) } (LabMisMatch1')                   
 
   (\gamma, \epsilon_i) / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (Eps2') 
   (\gamma, l_i') / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (LabMisMatch2')
-                  
+
+We aggressively provide 
 
 The problem with the above adjustment is that we will end up with many unwanted refinement and the size of the regex is blown up. 
 Let's consider an example. 
