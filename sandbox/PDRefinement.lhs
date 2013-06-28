@@ -229,22 +229,24 @@ To elaborate, we first need to consider the extension of partial derivative oper
 
  ** Case: i \not\in dom(\gamma)
                     
-  (\gamma, \epsilon_i) / l = {}   (Eps1) 
-  (\gamma, l_i) / l = { (\gamma, \epsilon_i) } (LabMatch1)
-  (\gamma, l_i') / l = { } (LabMisMatch1)                   
+  (\gamma, \epsilon_i) / l = {}                 -- (Eps1) 
+  (\gamma, l_i) / l = { (\gamma, \epsilon_i) }  -- (LabMatch1)
+  (\gamma, l_i') / l = { }                      -- (LabMisMatch1)                   
   (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }
-  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) 
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- (\gamma, r) / l }
+                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }   
+                                                -- (Pair1) 
+  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i)/l   -- (Choice1)
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- (\gamma, r) / l }      -- (Star1)
                     
  ** Case: i \in dom(\gamma)
-  (\gamma, \epsilon_i) / l = {}   (Eps2) 
-  (\gamma, l_i) / l = { \epsilon_i } (LabMatch2)
-  (\gamma, l_i') / l = { } (LabMisMatch2)                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, |\gamma(i)/l } , (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+  (\gamma, \epsilon_i) / l = {}                 -- (Eps2) 
+  (\gamma, l_i) / l = { (\gamma,\epsilon_i) }   -- (LabMatch2)
+  (\gamma, l_i') / l = { }                      -- (LabMisMatch2)                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l) } , (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
                         | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i) | (\gamma', r1') <- (\gamma(fv(r1)), r1) / l }
-  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l 
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- (\gamma, r) / l }
+                                                -- (Pair2)
+  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l  -- (Choice2)
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r') <- (\gamma, r) / l }     -- (Star2)
                     
                     
                   
@@ -267,19 +269,46 @@ e.g. given p = x :: (a|b)*  and w = c, matching w with p using partial derivativ
                   {} U {}  --> 
                      {}
                   
-Suppose the user requirement specifically require x to match with a non-empty word e.g. { x :: .+ }, note . matches with any single character
+Suppose the user requirement enforces that x should match with a non-empty word e.g. { x :: .+ }, note that '.' matches with any single symbol.
 
-One naive to fix it is to just update p by replacing (a|b)* with .+, however this is often too liberal, because the user requirement could be specified loosely.
+One naive way to refine the pattern p is to just update by replacing (a|b)* with .+, however doing so is often too liberal, because the user requirement could be specified loosely.
 
-An immediate (less naive) fix would be like the following.                   
+An immediate (less naive) fix would be adjusting the partial derivative operations as follows,
 
-  (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_i) }   (Eps1') 
-  (\gamma, l_i') / l = { (\gamma, \epsilon_i) } (LabMisMatch1')                   
 
-  (\gamma, \epsilon_i) / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (Eps2') 
-  (\gamma, l_i') / l = { ( \gamma-i U (i,r'), r'_i) | r' \in \gamma(i) / l }   (LabMisMatch2')
+ We adjust the pd operation to return the refinement environment besides the partial derivatives
 
-We aggressively provide 
+ ** Case: i \not\in dom(\gamma)
+                    
+  (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_j, {i : seq+ l_j weak}) }                   -- (Eps1') 
+  (\gamma, l_i) / l        = { (\gamma, \epsilon_i, {}) }                                    -- (LabMatch1)
+  (\gamma, l'_i) / l       = { (\gamma, \epsilon_i, {i : choice+ l_j weak}) }                -- (LabMisMatch1')                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise       = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, \theta) | (\gamma', r1'. \theta) <- (\gamma(fv(r1)), r1) / l }  
+                                                                                             -- (Pair1)                                               
+  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i)           -- (Choice1)
+  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r', \theta) <- (\gamma, r) / l }    -- (Star1)
+                    
+ ** Case: i \in dom(\gamma)
+  (\gamma, \epsilon_i) / l = { (\gamma', \epsilon_j, {i : seq+ l_j strong}) | \gamma' <- \gamma / l }   -- (Eps2') 
+  (\gamma, l_i) / l        = { (\gamma,  \epsilon_i, {}) }                                              -- (LabMatch2)             
+  (\gamma, l_i') / l       = { (\gamma', \epsilon_i, {i : choice+ l_j strong}) | \gamma' <- \gamma / l} -- (LabMisMatch2')                   
+  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l) } , (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
+                        | otherwise       = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l)}, (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) / l }
+                                                                                                        -- (Pair2)
+  (\gamma, (r1|r2)_i) /l   = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l                  -- (Choice2)
+  (\gamma, r*_i) / l       = { (\gamma', (r'r*)_i, \theta) | (\gamma', r', \theta) <- (\gamma, r) / l } -- (Star2)
+                    
+
+We aggressively provide suggestions \theta to those partial derivative cases which yields empty set, ref to case (Eps1'), (LabMisMatch1'), (Eps2') and (LabMisMatch2').
+
+The refinement suggestion \theta is defined as follows,
+
+ \theta ::= { 1:rop1, ..., n : rop_n }
+                   where 1..n are labels 
+ rop ::= (seq+ l_i level) | (choice+ l_i level)                     
+ level ::= weak | strong                  
+
 
 The problem with the above adjustment is that we will end up with many unwanted refinement and the size of the regex is blown up. 
 Let's consider an example. 
