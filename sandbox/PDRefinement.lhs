@@ -82,10 +82,10 @@ The Refinement checking judgement
 
  * The problem
 
-Let  $\gamma$ denote the user specification, $d$ denote the input document , $r$ the pattern and  $r'$ the refined pattern, 
+Let  $\gamma$ denote the user specification, $w$ denote the input document , $r$ the pattern and  $r'$ the refined pattern, 
 we use the judgement 
 $$\gamma, r \vdash d : r'$$ 
-to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that accepts $d$.
+to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that accepts $w$.
 
  * The user requirement 
 
@@ -154,53 +154,6 @@ r ::= () || (p|p) || pp || p* || l || \phi
 
 
 
-> deriv :: Re -> Char -> Re
-> deriv r l = simpFix $ deriv' r l
-
-
-> deriv' (Eps _) _ = Phi
-> deriv' (Choice x rs) l = Choice x (map (\r -> deriv' r l) rs)
-> deriv' (Pair x r1 r2) l | posEmpty r1 = Choice x [Pair x (deriv' r1 l) r2, deriv' r2 l]
->                        | otherwise = Pair x (deriv' r1 l) r2
-> deriv' (Star x r) l = Pair x (deriv' r l) (Star x r)
-> deriv' (Ch x c) l | c == l = (Eps x)
->                   | otherwise = Phi
-> deriv' Phi _ = Phi
-
-
-> simpFix :: Re -> Re
-> simpFix p = let q = simp p
->             in if q == p
->                then q
->                else simpFix q
-
-
-> simp :: Re  -> Re 
-> simp (Pair l1 (Eps l2) r) 
->   | isPhi r   = Phi
->   | otherwise = r
-> simp (Pair l r1 r2)
->   | isPhi r1 || isPhi r2 = Phi
->   | otherwise            = Pair l (simp r1) (simp r2)
-> simp (Choice l []) = Eps l
-> simp (Choice l [r]) = r
-> simp (Choice l rs)
->  | any isChoice rs =  
->     Choice l $ 
->        foldl (\rs-> \r-> case r of
->                Choice l rs2 -> rs ++ rs2
->                _            -> rs ++ [r])
->              [] rs
->  | otherwise = Choice l $ nub $ filter (not.isPhi) $ map simp rs
-> simp (Star l1 (Eps l2)) = Eps l2
-> simp (Star l1 (Star l2 r)) = Star l1 r 
-> simp (Star l r)
->  | isPhi r   = Eps l
->  | otherwise = Star l $ simp r 
-> simp x = x 
-
-
-
 > class PDeriv t where
 >   pderiv :: t -> Char -> [Re]
 
@@ -217,7 +170,7 @@ partial derivatives of regex
 >                     | otherwise = []
 >   pderiv Phi _ = []
 
- * partial derivatives of a set of regexs
+* partial derivatives of a set of regexs
 
 > instance PDeriv t => PDeriv [t] where
 >   pderiv rs l = concatMap (\r -> pderiv r l) rs
@@ -280,209 +233,84 @@ An immediate (less naive) fix would be adjusting the partial derivative operatio
 
  ** Case: i \not\in dom(\gamma)
                     
-  (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_j, {i : seq+ l_j weak}) }                   -- (Eps1') 
-  (\gamma, l_i) / l        = { (\gamma, \epsilon_i, {}) }                                    -- (LabMatch1)
-  (\gamma, l'_i) / l       = { (\gamma, \epsilon_i, {i : choice+ l_j weak}) }                -- (LabMisMatch1')                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise       = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, \theta) | (\gamma', r1'. \theta) <- (\gamma(fv(r1)), r1) / l }  
+  (\gamma, \epsilon_i) /^{level} l = { (\gamma, \epsilon_j, {i : seq+ l_j (max level weak)}) }                   -- (Eps1') 
+  (\gamma, l_i) /^{level} l        = { (\gamma, \epsilon_i, {}) }                                    -- (LabMatch1)
+  (\gamma, l'_i) /^{level} l       = { (\gamma, \epsilon_i, {i : choice+ l_j (max level weak)}) }                -- (LabMisMatch1')                   
+  (\gamma, (r1r2)_i) /^{level}l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) /^{level} l } ++  (\gamma(fv(r2)), r2) /^{level} l
+                                | otherwise       = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, \theta) | (\gamma', r1'. \theta) <- (\gamma(fv(r1)), r1) /^{level} l }  
                                                                                              -- (Pair1)                                               
-  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i)           -- (Choice1)
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i) | (\gamma', r', \theta) <- (\gamma, r) / l }    -- (Star1)
+  (\gamma, (r1|r2)_i) /^{level} l = (\gamma(fv(r1_i)), r1_i)/^{level}l ++ (\gamma(fv(r2_i)), r2_i)/^{level}l           -- (Choice1)
+  (\gamma, r*_i) /^{level} l = { (\gamma', (r'r*)_i) | (\gamma', r', \theta) <- (\gamma, r) /^{level} l }    -- (Star1)
                     
  ** Case: i \in dom(\gamma)
-  (\gamma, \epsilon_i) / l = { (\gamma', \epsilon_j, {i : seq+ l_j strong}) | \gamma' <- \gamma / l }   -- (Eps2') 
-  (\gamma, l_i) / l        = { (\gamma,  \epsilon_i, {}) }                                              -- (LabMatch2)             
-  (\gamma, l_i') / l       = { (\gamma', \epsilon_i, {i : choice+ l_j strong}) | \gamma' <- \gamma / l} -- (LabMisMatch2')                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l) } , (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise       = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l)}, (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) / l }
+  (\gamma, \epsilon_i) /^{level} l = { (\gamma', \epsilon_j, {i : seq+ l_j strong}) | \gamma' <- \gamma / l }   -- (Eps2') 
+  (\gamma, l_i) /^{level} l        = { (\gamma,  \epsilon_i, {}) }                                              -- (LabMatch2)             
+  (\gamma, l_i') /^{level} l       = { (\gamma', \epsilon_i, {i : choice+ l_j strong}) | \gamma' <- \gamma / l} -- (LabMisMatch2')                   
+  (\gamma, (r1r2)_i) /^{level}l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l) } , (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) /^{strong} l } ++  (\gamma(fv(r2)), r2) / l
+                                | otherwise       = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, \gamma(i)/l)}, (r1'r2)_i, \theta) | (\gamma', r1', \theta) <- (\gamma(fv(r1)), r1) /^{strong} l }
                                                                                                         -- (Pair2)
-  (\gamma, (r1|r2)_i) /l   = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l                  -- (Choice2)
-  (\gamma, r*_i) / l       = { (\gamma', (r'r*)_i, \theta) | (\gamma', r', \theta) <- (\gamma, r) / l } -- (Star2)
+  (\gamma, (r1|r2)_i) /^{level} l   = (\gamma(fv(r1_i)), r1_i)/^{strong} l ++ (\gamma(fv(r2_i)), r2_i) /^{strong} l                  -- (Choice2)
+  (\gamma, r*_i) /^{level} l       = { (\gamma', (r'r*)_i, \theta) | (\gamma', r', \theta) <- (\gamma, r) /^{strong} l } -- (Star2)
                     
 
-We aggressively provide suggestions \theta to those partial derivative cases which yields empty set, ref to case (Eps1'), (LabMisMatch1'), (Eps2') and (LabMisMatch2').
+Now the partial derivative operation is extended to handle the (\gamma, r) pairs.
+The pderiv operation over (\gamma,r) pairs provides refinement suggestions \theta to those partial derivative cases which yield an empty set, 
+ref to case (Eps1'), (LabMisMatch1'), (Eps2') and (LabMisMatch2').
 
 The refinement suggestion \theta is defined as follows,
 
- \theta ::= { 1:rop1, ..., n : rop_n }
+ \theta ::= { 1:rop_1, ..., n : rop_n }
                    where 1..n are labels 
  rop ::= (seq+ l_i level) | (choice+ l_i level)                     
  level ::= weak | strong                  
 
-
-The problem with the above adjustment is that we will end up with many unwanted refinement and the size of the regex is blown up. 
-Let's consider an example. 
-
-Example 1:
-(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(r',(a_1|b_2)_0*_3)_3) | (\gamma',r') <- (\gamma, (a_1|b_2)_0) / b }  
-because
-(\gamma, (a_1|b_2)_0) / b = { (\gamma, \epsilon_1_0), (\gamma, \epsilon_2_0) } -- note that thanks to  (LabMisMatch1'), the first epsilon was produced by \gamma,a / b
-
-As a result 
-
-(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(\epsilon_1_0,(a_1|b_2)_0*_3)_3) , (\gamma',(\epsilon_2_0,(a_1|b_2)_0*_3)_3) }   -- (10)
-
-apply denormalization, (denorm goes by the annotation _i)
-
-there are two monomials
-the monomial is not affected by the refinement 
-(a, { (\epsilon_1_0, (a_1|b_2)_0*_3) } )
-the other monomial is affected by the refinement, derived from  (10) by removing the \gamma'
-(b, { (\epsilon_1_0,(a_1|b_2)_0*_3) , (\epsilon_2_0,(a_1|b_2)_0*_3)_3 }) 
-
-
-applying de-normalization to the above two monomials,
-
-(a, { (\epsilon_1_0, (a_1|b_2)_0*_3) } ) ~> (a_1| __ ) (a_1|b_2)_0*_3   -- we push a back to a_1, by treating "\epsilon_1_0" is the place holder for 'a'
-
-(b, { (\epsilon_1_0,(a_1|b_2)_0*_3) , (\epsilon_2_0,(a_1|b_2)_0*_3)_3 })  ~>  ( b_1 | b_2 ) (a_1|b_2)_0*_3 
-
-
-Note that the b_1 is created by an unnecessary refinement step. If we combine, we have (a_1 | b_1 | b_2) (a_1|b_2)_0*_3 , 
-
-
-the denorm will "generalize" it into a star exp ((a|b)_1 | b_2)_0*_3 which is extended unnecessary. (we will show how the
-generalization work later) \kl{maybe we should start showing how the normalization and denormalization work?
-
-The problem is how shall we get rid of b_1?
-
-
-Let's consider another example
-
-
-Example 2:
-
-({ (1 : (a|c)) }, (a_1|b_2)_0*_3) / c  = 
-  { (\gamma',(r',(a|b)*)) | (\gamma',r') <- ({ (1 : (a|b|c)) }, (a_1|b_2)_0) / c }      
-  =                    
-
-({ (1 : (a|c)) }, (a_1|b_2)_0 ) / c = { ( { 1:\epsilon } , \epsilon_1_0), ( { } , \epsilon_2_0) }
-
-hence the monomials
-(a, {(\epsilon_1_0, (a_1|b_2)_0*_3)} )    ~> (a_1_0, (a_1|b_2)_0*_3)
-(b, {(\epsilon_2_0, (a_1|b_2)_0*_3)} )    ~> (b_2_0, (a_1|b_2)_0*_3)   
-(c, {(\epsilon_1_0, (a_1|b_2)_0*_3), (\epsilon_2_0, (a_1|b_2)_0*_3)} )  ~> (c_1_0|c_2_0), (a_1|b_2)_0*_3)   
-
-Note that either c_1_0 or c_2_0 is an redundant result of refinement. So now the question is which one to removed?
-
-In this case, it seems that c_1_0 should be the one to be kept, since the user requirement { (1 : (a|c)) } suggest that 
-the c can be added under 1.
-
-
-The trick is to annotate the pd with the "recommendation" info.
-
-
-Let recommendation defined as
-
- rec :: = s | w | f
-
-where f > s > w
-
-PD of (\gamma,r) /l added with recommendation info
-
- ** Case: i \not\in dom(\gamma)
-                    
-  (\gamma, \epsilon_i) / l = { (\gamma, \epsilon_i, w) }   (Eps1') 
-  (\gamma, l_i) / l = { (\gamma, \epsilon_i, f) } (LabMatch1)
-  (\gamma, l_i') / l = { (\gamma, \epsilon_i, w) } (LabMisMatch1')                   
+A refinement suggestion environment \theta is a set of mapping which maps regex src location i to recommendation operation rop.
+There are two kinds of rops, sequence expansion seq+ or choice expansion choice+. The sequence expansion recommends to append l_i
+to the src location.  e.g. let \theta_1 =  { 1 : seq+ b_2 weak }, r = a_1, then \theta_1(r) = a_1b_2
+The choice expansion recommends to add l_i to the union. e.g. let \theta_2 = { 1 : choice+ b_2 weak}, r = a_1 then \tehta_1(r) = (a_1|b_2)
                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l }
-  (\gamma, (r1|r2)_i) / l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) 
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i, rec) | (\gamma', r', rec) <- (\gamma, r) / l }
-                    
- ** Case: i \in dom(\gamma)
-  (\gamma, \epsilon_i) / l = { ( \gamma-i U (i,r'), r'_i, s) | r' \in \gamma(i) / l }   (Eps2')   
-  (\gamma, l_i) / l = { ( \gamma-i U (i,r'), \epsilon_i, f) } (LabMatch2)
-  (\gamma, l_i') / l = { ( \gamma-i U (i,r'), r'_i, s) | r' \in \gamma(i) / l }   (LabMisMatch2')
+The helper function 'max' returns the upper bound of two recommendation levels               
                   
-  (\gamma, (r1r2)_i) /l | \epsilon \in r1 = { (\gamma' ++ \gamma(fv(r2)) ++ { (i, |\gamma(i)/l } , (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l } ++  (\gamma(fv(r2)), r2) / l
-                        | otherwise  = { (\gamma' ++ \gamma(fv(r2)), (r1'r2)_i, rec) | (\gamma', r1', rec) <- (\gamma(fv(r1)), r1) / l }
-  (\gamma, (r1|r2)_i) /l = (\gamma(fv(r1_i)), r1_i)/l ++ (\gamma(fv(r2_i)), r2_i) /l 
-  (\gamma, r*_i) / l = { (\gamma', (r'r*)_i, rec) | (\gamma', r', rec) <- (\gamma, r) / l }
+ max strong _ = strong                  
+ max _ strong = strong                   
+ max weak weak = weak                   
 
 
-with the recommendation info, we now re-run the above two examples.
+Apart from the (\gamma, r) pairs extension, the pderiv op / is now parameterized by the {level} which stands for the level of recommendation. Let's ignore it for a while,
+we will come back to it soon. 
 
-Example 1 (revisited):
-(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(r',(a_1|b_2)_0*_3)_3) | (\gamma',r',rec) <- (\gamma, (a_1|b_2)_0) / b }  
-because
-(\gamma, (a_1|b_2)_0) / b = { (\gamma, \epsilon_1_0, w), (\gamma, \epsilon_2_0, f) } 
-Since these two states are overlapping, hence the weak recommendation is removed in the presence of f
+* KEY IDEA #1: CHOOSING THE MINIMAL REFINEMENT BASED ON THE RESULTING NFA
 
-The duplication is removed based on the ordering of the recommendation info
-Given { (\gamma1, r, rec_1) , (\gamma1, r, rec_2) },
- (\gamma1, r, rec_2) is removed iff rec_2 <= rec_1
+Note that given a pattern r and a input word w where w \not \in r, we have  \theta_1 and  \theta_2
+such that  \theta_1 \not\eq \theta_2 and w \in \theta_1(r) and w \in \theta_2(r). Let's consider the following example. 
 
+Let r = (a|b)* and w = abc, we can either refinement r by extending the choice resulting (a|(b|c))* or a appending c after b resulting (a|(bc))*
+TODO: show the full details of the refinmenet with the src loc.
 
-As a result 
+Which one is better? of course we favor the minimal refinement. In a general settings, we of course will pick a \theta which is smaller in size 
+(i.e. few changes). However as the above example highlights that there are situation where there are multiple \theta of the same size. 
 
-(\gamma, (a_1|b_2)_0*_3) / b = { (\gamma',(\epsilon_2_0,(a_1|b_2)_0*_3)_3) }   -- (10)
-
-The denormalization yields (a_1|b_2)_0*_3 (no refinement is required)
+One key idea is that the choice+ extension is favored because it leads to a smaller NFA (i.e. only a transition is added).
+Whilst the seq+ is leading to a larger NFA (i.e. it adds a transition and a new state)
 
 
+* KEY IDEA #2: CHOOISING THE REFEINEMENT BASED ON THE USER REQUIREMENT 
 
-Example 2 (revisited): 
+Let's consider an example,
 
-({ (1 : (a|c)) }, (a_1|b_2)_0*_3) / c  = 
-  { (\gamma',(r',(a|b)*),rec ) | (\gamma',r',rec) <- ({ (1 : (a|b|c)) }, (a_1|b_2)_0) / c }      
-  =                    
+let r = ((a)_1 | (b)_2), w = c
 
-({ (1 : (a|c)) }, (a_1|b_2)_0 ) / c = { ( { 1:\epsilon } , \epsilon_1_0, s), ( { } , \epsilon_2_0, w) }
+\gamma = { 1 : (.) }
 
-Again the two resulting states are overlappng, we remove the weak recommendation in the presence of the strong recommendation
+we have two possible refinement recommendation, 
 
-Thus, we have the following monomials
-(a, {(\epsilon_1_0, (a_1|b_2)_0*_3)} )    ~> (a_1_0, (a_1|b_2)_0*_3)
-(b, {(\epsilon_2_0, (a_1|b_2)_0*_3)} )    ~> (b_2_0, (a_1|b_2)_0*_3)   
-(c, {(\epsilon_1_0, (a_1|b_2)_0*_3)} )  ~> (c_1_0, (a_1|b_2)_0*_3)   
-
-the final denormalization yields 
-
-((a_1|c_1)|b_2)_0 ((a_1|b_2)_0*_3) 
-
-hence will be generalized to
-(((a_-1|c_-1)_1|b_2)_0*_3) 
+\theta_1 = { 1: (choice+ c_3 strong) }  -- note that the recommendataion level is taken into consideration
+\theta_2 = { 2: (choice+ c_3 weak) }  
 
 
-> {- 
-
-> data URPair = URPair UReq Re Recommend deriving (Show, Eq)
-
-> data Recommend = Strong | Weak | Fixed deriving (Show, Eq)
-
-> instance Ord Recommend where
->   compare Fixed Fixed = EQ
->   compare Fixed _     = GT
->   compare Strong Strong = EQ
->   compare Strong Weak = GT
->   compare Strong Fixed = LT
->   compare Weak Weak = EQ
->   compare Weak _ = LT
-
-> class URPDeriv t where
->   urPDeriv :: t -> Char -> [URPair]
-
-> instance URPDeriv URPair where
->   urPDeriv (URPair ureq (Eps (i:is)) rec) l
->     | i `inUR` ureq = [ URPair (updateUR i r' ureq) (annotate (i:is) r') Strong
->                        | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
->     | otherwise   = [ URPair ureq (Eps (i:is)) Weak ]
->   urPDeriv (URPair ureq (Ch (i:is) l) rec) l' 
->     | i `inUR` ureq && l == l' = [ URPair (updateUR i r' ureq) (Eps (i:is)) Fixed
->                                   | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
->     | i `inUR` ureq && l /= l' = [ URPair (updateUR i r' ureq) (annotate (i:is) r') Strong
->                                    | r' <- pderiv (fromJust (lookupUR i ureq)) l  ]
->     | not (i `inUR` ureq) && l == l' = [ URPair ureq (Eps (i:is)) Fixed ]
->     | otherwise = [ URPair ureq (Eps (i:is)) Weak ]
->   urPDeriv = undefined -- TODO
+We favor \tehta_1 because as the user requirement enforces that src loc 1 should match at least one character (any character).
 
 
-> instance URPDeriv t => URPDeriv [t] where
->   urPDeriv urs l = concatMap (\ur -> urPDeriv ur l) urs -- nub?
-
-> -}
 
 
 partial derivative
@@ -542,16 +370,16 @@ partial derivative
 * The Replacement Relation 
 We use the following judgement to denote the replacement relation
 $$ \gamma, p \turns d : q $$ 
-where $\gamma$ is the user requirement, $p$ is the existing regular expression, $d$ is the input document and $q$ is the replacement regular expression.
-It reads, under user requirement $\gamma$, $p$ can be replaced by $q$ which accepts $d$. 
+where $\gamma$ is the user requirement, $p$ is the existing regular expression, $w$ is the input document and $q$ is the replacement regular expression.
+It reads, under user requirement $\gamma$, $p$ can be replaced by $q$ which accepts $w$. 
 
 There are two properties follows 
 
  1. $d\in r \Longrightarrow \Delta$ implies $ \Delta \vdash \gamma$ and $r \subseq t$.
  2. $d \not \in r$ implies $r \gamma\over\approximate t$  and $d \in t \Longrightarrow \Delta$ and $\Delta \vdash \gamma$.
 
-The first property ensures that the replacement is subsuming the orginal regex $r$ if $d$ is already in $r$ and the matching result is conforming to the user requirement.
-The second property ensures that if $d$ is not in $r$, the replacement shall have the same requirement-shape as the orginal one and conform to the user requirement. 
+The first property ensures that the replacement is subsuming the orginal regex $r$ if $w$ is already in $r$ and the matching result is conforming to the user requirement.
+The second property ensures that if $w$ is not in $r$, the replacement shall have the same requirement-shape as the orginal one and conform to the user requirement. 
 
 
 > replacement :: UReq -> Re -> Doc -> Re -> Bool 
@@ -658,7 +486,7 @@ refined sub regex (nfa state).
 
 The algorithm correctness property (Soundness)
 
-Let $\gamma$ be the user requirement, $r$ denote the initial regular expression pattern, $d$ denote the input document
+Let $\gamma$ be the user requirement, $r$ denote the initial regular expression pattern, $w$ denote the input document
 $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r1'|...|rn'$.
 
 
@@ -797,10 +625,68 @@ count the number of ROps in renv
 
 > urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
 > urePDeriv (ur, r, psi) l = let max_i = maximum $ getLabels (psi `apply` r)
->                            in urPDeriv (ur,psi `apply` r) l (max_i + 1)
+>                            in urPDeriv (ur,psi `apply` r) l Weak (max_i + 1)
+
+
+finding the maximal among two RLevels
+
+> maximal :: RLevel -> RLevel -> RLevel
+> maximal Strong _ = Strong
+> maximal _ Strong = Strong
+> maximal _ _ = Weak
+
+> urPDeriv :: (UReq, Re) -> Char -> RLevel -> Int -> [(UReq, Re, REnv)]
+> urPDeriv (ur, Eps (i:is)) l rlvl next_i 
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
+>                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
+>   | otherwise   = [ (ur, Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) (maximal rlvl Weak)]) ]
+> urPDeriv (ur, (Ch (i:is) l)) l' rlvl next_i  = 
+>   case lookup i ur of 
+>     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
+>                            | r' <- pderiv r l ]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [next_i] l') Strong]) | r' <- pderiv r l]
+>     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [next_i] l') (maximal rlvl Weak)] ) ] 
+>     }
+> urPDeriv (ur, Pair (i:is) r1 r2) l rlvl next_i  =
+>    case lookup i ur of 
+>     { Just p -> 
+>         case pderiv p l of
+>           { [] -> [] 
+>           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i ] ++ (urPDeriv (ur `limit` (fv r2), r2) l Strong next_i)
+>                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i] 
+>           }
+>     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ] ++ (urPDeriv (ur `limit` (fv r2), r2) l rlvl next_i)
+>               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ]
+>     }
+> urPDeriv (ur, Choice (i:is) rs) l rlvl next_i = 
+>    case lookup i ur of
+>      { Just p ->  
+>          case pderiv p l of
+>          { [] -> []
+>          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
+>                  in concatMap (\ r -> urPDeriv (ur', r) l Strong next_i) rs -- todo:move i:is to each r
+>          }
+>      ; Nothing -> concatMap (\ r -> urPDeriv (ur, r) l rlvl next_i) rs 
+>      }
+> urPDeriv (ur, Star (i:is) r) l rlvl next_i = 
+>     case lookup i ur of 
+>       { Just p -> 
+>          case pderiv p l of
+>          { [] -> []
+>          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
+>                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
+>                        | (ur'', r', renv) <- urPDeriv (ur',r) l Strong next_i ]
+>          }
+>       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
+>                        | (ur', r', renv) <- urPDeriv (ur,r) l rlvl next_i ]
+>       }
+> urPDeriv ur c rlvl next_i = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
 
 
 
+
+> {- replaced by the above forumation, combining urPDeriv and urPDerivS by parameterizing S
 > urPDeriv :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
 > urPDeriv (ur, Eps (i:is)) l next_i
 >   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
@@ -899,7 +785,7 @@ urPDeriv with Strong recommendation
 >                        | (ur', r', renv) <- urPDerivS (ur,r) l next_i]
 >       }
 > urPDerivS ur c next_i = error $ "unhandled input: " ++ (show ur)  ++ "/" ++ (show c)
-
+> -}
 
 
 return all labels annotation of a re
