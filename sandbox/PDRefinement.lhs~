@@ -527,13 +527,11 @@ r5 = .*<s>([0-9]+)</s>.*
 g3 = [(1::Int, [0-9]+)]
 
 
-> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) ([47,60,62] ++ [100,104])) -- [97..122]))
+> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128])
 
-> -- anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128])
+> anyNum x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [49..58])
 
-> anyNum x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [48]) 
-
-> w = "<h><d>00</d></h>"
+> w = "<h><d>65103020</d></h>"
 > r5 = Pair [1] p1 (Pair [2] p2 (Pair [3] p3 (Pair [4] p4 p5)))
 >   where p1 = Star [20] (anySym 30) 
 >         p2 = Pair [41] (Ch [42] '<') (Pair [43] (Ch [44] 's') (Ch [45] '>'))
@@ -630,14 +628,10 @@ count the number of ROps in renv
                        
 > data RLevel = Strong | Weak deriving (Ord, Eq, Show)
 
-top level function
-
 > refine :: UReq -> Re -> [Char] -> [Re]
 > refine ureq r cs = 
 >   let renvs = nub $ sortBy compareREnv (ref [(ureq, r, IM.empty)] cs)
 >   in  map (\renv -> apply renv r)  renvs
-
-the main routine
 
 > ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
 > ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply` r) ] ++ 
@@ -647,11 +641,10 @@ the main routine
 >                     , any (\i -> case lookupUR i ureq of
 >                                  { Nothing -> False
 >                                  ; Just t  -> posEmpty t }) (getLabel r) ]
-> ref urs (l:w) = let io = logger (print (l:w)) 
->                     urs' = concatMap (\ (ur,r,renv) -> 
+> ref urs (l:w) = let urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
 >                                     in  map (\(ur', r', renv') -> (ur', r',  combine renv renv')) urs'') urs
->                 in io `seq` ref urs' w
+>                 in ref urs' w
 
 
 
