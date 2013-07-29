@@ -80,7 +80,7 @@ The Refinement checking judgement
 > import Data.Maybe
 > import Data.Char
 
-> logger io = unsafePerformIO io
+> logger io = () -- unsafePerformIO io
 
  * The problem
 
@@ -332,7 +332,10 @@ partial derivative
 
 > getLabels :: Re -> [Int]
 > getLabels (Eps x)      = x
-> getLabels (Choice x rs) = x ++ concatMap getLabels rs
+> getLabels (Choice x rs) = let io = logger $ do { print "=========================="
+>                                                ; print ((show rs) ++ "\n\n")
+>                                                ; print "==========================" }
+>                           in io `seq`  x ++ concatMap getLabels rs
 > getLabels (Pair x r1 r2) = x ++ (getLabels r1) ++ (getLabels r2)
 > getLabels (Star x r)   = x ++ (getLabels r)
 > getLabels (Ch x _)     = x
@@ -527,7 +530,7 @@ r5 = .*<s>([0-9]+)</s>.*
 g3 = [(1::Int, [0-9]+)]
 
 
-> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) ([47,60,62] ++ [100,104])) -- [97..122]))
+> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [47] )--  ([47,60,62] ++ [100,104])) -- [97..122]))
 
 > -- anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128])
 
@@ -641,7 +644,7 @@ the main routine
 
 > ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
 > ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply` r) ] ++ 
->              [ extend renv (getLabel r) (RAdd (Eps dontcare) Strong)
+>              [ extend renv (getLabel r) (RAdd (Eps dontcare) Strong) -- try to fix those states which are non-final?
 >                     | (ureq, r, renv) <- urs
 >                     , not (posEmpty (renv `apply` r))
 >                     , any (\i -> case lookupUR i ureq of
@@ -652,6 +655,17 @@ the main routine
 >                                     let urs'' = urePDeriv (ur, r, renv) l
 >                                     in  map (\(ur', r', renv') -> (ur', r',  combine renv renv')) urs'') urs
 >                 in io `seq` ref urs' w
+
+
+
+
+> ref' :: [(UReq, Re, REnv)] -> [Char] -> [(Re,REnv)]
+> ref' urs [] = [ (renv `apply` r,renv) | (ureq, r, renv) <- urs ] 
+> ref' urs (l:w) = let 
+>                      urs' = concatMap (\ (ur,r,renv) -> 
+>                                     let urs'' = urePDeriv (ur, r, renv) l
+>                                     in  map (\(ur', r', renv') -> (ur', r',  combine renv renv')) urs'') urs
+>                  in ref' urs' w
 
 
 
@@ -686,10 +700,13 @@ finding the maximal among two RLevels
 >     { Just p -> 
 >         case pderiv p l of
 >           { [] -> [] 
->           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i ] ++ (urPDeriv (ur `limit` (fv r2), r2) l Strong next_i)
->                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i] 
+>           ; ps  | posEmpty r1 -> let ur2 =  ur `limit` fv r2 
+>                                  in ur2 `seq` [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i ] ++ (urPDeriv (ur2, r2) l Strong next_i)
+>                 | otherwise   -> let ur2 =  ur `limit` fv r2 
+>                                  in ur2 `seq` [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i] 
 >           }
->     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ] ++ (urPDeriv (ur `limit` (fv r2), r2) l rlvl next_i)
+>     ; Nothing | posEmpty r1 -> let ur2 =  ur `limit` fv r2 
+>                                in ur2 `seq`  [ ((ur' ++ ur2) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ] ++ (urPDeriv (ur2, r2) l rlvl next_i)
 >               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ]
 >     }
 > urPDeriv (ur, Choice (i:is) rs) l rlvl next_i = 

@@ -1,100 +1,116 @@
-	Thu Jul 25 16:58 2013 Time and Allocation Profiling Report  (Final)
+	Sat Jul 27 16:27 2013 Time and Allocation Profiling Report  (Final)
 
 	   PDRefinement +RTS -p -RTS 0
 
-	total time  =       32.75 secs   (32751 ticks @ 1000 us, 1 processor)
-	total alloc = 43,863,627,600 bytes  (excludes profiling overheads)
+	total time  =        1.47 secs   (1472 ticks @ 1000 us, 1 processor)
+	total alloc = 1,618,867,216 bytes  (excludes profiling overheads)
 
 COST CENTRE MODULE  %time %alloc
 
-fv          Main     65.8   64.9
-getLabels   Main     32.5   34.8
+getLabels   Main     56.2   69.3
+showsPrec   Main     24.0   29.2
+logger      Main     16.7    0.3
 
 
                                                                     individual     inherited
 COST CENTRE               MODULE                  no.     entries  %time %alloc   %time %alloc
 
-MAIN                      MAIN                     47           0    0.0    0.0   100.0  100.0
- main                     Main                     95           0    0.0    0.0     0.0    0.0
-  main.i                  Main                     96           1    0.0    0.0     0.0    0.0
- CAF                      Main                     93           0    0.0    0.0   100.0  100.0
-  g3                      Main                    112           1    0.0    0.0     0.0    0.0
-  r5                      Main                    109           1    0.0    0.0     0.0    0.0
-   r5.p5                  Main                    157           1    0.0    0.0     0.0    0.0
-    anySym                Main                    158           1    0.0    0.0     0.0    0.0
-     anySym.\             Main                    159           5    0.0    0.0     0.0    0.0
-   r5.p4                  Main                    156           1    0.0    0.0     0.0    0.0
-   r5.p3                  Main                    124           1    0.0    0.0     0.0    0.0
-    anyNum                Main                    154           1    0.0    0.0     0.0    0.0
-     anyNum.\             Main                    155           1    0.0    0.0     0.0    0.0
-   r5.p2                  Main                    123           1    0.0    0.0     0.0    0.0
-   r5.p1                  Main                    114           1    0.0    0.0     0.0    0.0
-    anySym                Main                    118           1    0.0    0.0     0.0    0.0
-     anySym.\             Main                    119           5    0.0    0.0     0.0    0.0
-  w                       Main                    100           1    0.0    0.0     0.0    0.0
-  main                    Main                     94           1    0.0    0.0   100.0  100.0
-   refine                 Main                     97           1    0.0    0.0   100.0  100.0
-    refine.renvs          Main                     98           1    0.0    0.0   100.0  100.0
-     ref                  Main                     99           9    0.0    0.0   100.0  100.0
-      ref.urs'            Main                    103           9    0.0    0.0   100.0  100.0
-       ref.urs'.\         Main                    104           9    0.0    0.0   100.0  100.0
-        ref.urs'.\.\      Main                    121           8    0.0    0.0     0.0    0.0
-         combine          Main                    122           8    0.0    0.0     0.0    0.0
-          combine.\       Main                    160           1    0.0    0.0     0.0    0.0
-           ==             Main                    161           1    0.0    0.0     0.0    0.0
-        ref.urs'.\.urs''  Main                    105           9    0.0    0.0   100.0  100.0
-         urePDeriv        Main                    106           9    0.0    0.0   100.0  100.0
-          urePDeriv.max_i Main                    138           7    0.0    0.0    32.9   34.9
-           getLabels      Main                    142      274786   32.5   34.8    32.5   34.8
-           apply          Main                    139      146876    0.2    0.0     0.4    0.1
-            apply.\       Main                    151        6091    0.0    0.0     0.0    0.0
-             annotate     Main                    152        6091    0.0    0.0     0.0    0.0
-            apply.r'      Main                    149      115322    0.0    0.0     0.0    0.0
-             apply'       Main                    150      115322    0.0    0.0     0.0    0.0
-            apply.apps    Main                    147      115322    0.0    0.0     0.1    0.0
-             apply.apps.\ Main                    169      114909    0.0    0.0     0.0    0.0
-             isRApp       Main                    148      121819    0.0    0.0     0.0    0.0
-            apply.r''     Main                    145      115322    0.0    0.0     0.1    0.0
-             app          Main                    146      230642    0.0    0.0     0.1    0.0
-              annotate    Main                    168      114909    0.0    0.0     0.0    0.0
-              app.is      Main                    166      115320    0.0    0.0     0.0    0.0
-               getLabel   Main                    167      115320    0.0    0.0     0.0    0.0
-            apply.adds    Main                    143      115322    0.0    0.0     0.0    0.0
-             apply.adds.\ Main                    153        6091    0.0    0.0     0.0    0.0
-             isRAdd       Main                    144      121411    0.0    0.0     0.0    0.0
-            apply'        Main                    141       31554    0.0    0.0     0.0    0.0
-            getLabel      Main                    140      146876    0.0    0.0     0.0    0.0
-          urPDeriv        Main                    111          27    0.0    0.0    66.0   64.9
-           inUR           Main                    136           7    0.0    0.0     0.0    0.0
-            lookupUR      Main                    137           7    0.0    0.0     0.0    0.0
-           urPDeriv.\     Main                    120           2    0.0    0.0     0.0    0.0
-           fv             Main                    117      583692   65.8   64.9    65.8   64.9
-           limit          Main                    115          30    0.0    0.0     0.2    0.0
-            limit.\       Main                    116          16    0.2    0.0     0.2    0.0
-           posEmpty       Main                    113          33    0.0    0.0     0.0    0.0
-          apply           Main                    107      313642    0.4    0.1     1.1    0.2
-           apply.\        Main                    133       11720    0.0    0.0     0.0    0.0
-            annotate      Main                    134       11720    0.0    0.0     0.0    0.0
-           apply.r'       Main                    131      246725    0.0    0.0     0.1    0.0
-            apply'        Main                    132      246725    0.1    0.0     0.1    0.0
-           apply.apps     Main                    129      246725    0.1    0.1     0.2    0.1
-            apply.apps.\  Main                    165      246723    0.0    0.0     0.0    0.0
-            isRApp        Main                    130      258443    0.0    0.0     0.0    0.0
-           apply.r''      Main                    127      246725    0.0    0.0     0.3    0.1
-            app           Main                    128      493448    0.1    0.0     0.2    0.1
-             annotate     Main                    164      246723    0.1    0.0     0.1    0.0
-             app.is       Main                    162      246723    0.0    0.0     0.0    0.0
-              getLabel    Main                    163      246723    0.0    0.0     0.0    0.0
-           apply.adds     Main                    125      246725    0.1    0.0     0.1    0.0
-            apply.adds.\  Main                    135       11720    0.0    0.0     0.0    0.0
-            isRAdd        Main                    126      258443    0.0    0.0     0.0    0.0
-           apply'         Main                    110       66916    0.0    0.0     0.0    0.0
-           getLabel       Main                    108      313642    0.0    0.0     0.0    0.0
-      ref.io              Main                    101           9    0.0    0.0     0.0    0.0
-       logger             Main                    102           9    0.0    0.0     0.0    0.0
- CAF                      GHC.Conc.Signal          92           0    0.0    0.0     0.0    0.0
- CAF                      GHC.IO.Encoding          85           0    0.0    0.0     0.0    0.0
- CAF                      GHC.IO.Encoding.Iconv    83           0    0.0    0.0     0.0    0.0
- CAF                      GHC.IO.Handle.FD         76           0    0.0    0.0     0.0    0.0
- CAF                      GHC.TopHandler           70           0    0.0    0.0     0.0    0.0
- CAF                      Text.Read.Lex            61           0    0.0    0.0     0.0    0.0
+MAIN                      MAIN                     51           0    0.0    0.0   100.0  100.0
+ main                     Main                    103           0    0.0    0.0     0.0    0.0
+  main.i                  Main                    104           1    0.0    0.0     0.0    0.0
+ CAF                      Main                    101           0    0.0    0.0   100.0  100.0
+  anyNum                  Main                    175           0    0.0    0.0     0.0    0.0
+   anyNum.\               Main                    176           1    0.0    0.0     0.0    0.0
+  showsPrec               Main                    168           0    0.0    0.0     0.0    0.0
+  showList                Main                    159           1    0.0    0.0     0.0    0.0
+  getLabels               Main                    156           0    0.0    0.0     0.1    0.0
+   getLabels.io           Main                    157           0    0.1    0.0     0.1    0.0
+    logger                Main                    158           0    0.0    0.0     0.0    0.0
+  anySym                  Main                    131           0    0.0    0.0     0.0    0.0
+   anySym.\               Main                    132           2    0.0    0.0     0.0    0.0
+  g3                      Main                    120           1    0.0    0.0     0.0    0.0
+  r5                      Main                    117           1    0.0    0.0     0.0    0.0
+   r5.p5                  Main                    179           1    0.0    0.0     0.0    0.0
+    anySym                Main                    180           1    0.0    0.0     0.0    0.0
+   r5.p4                  Main                    178           1    0.0    0.0     0.0    0.0
+   r5.p3                  Main                    173           1    0.0    0.0     0.0    0.0
+    anyNum                Main                    174           1    0.0    0.0     0.0    0.0
+   r5.p2                  Main                    172           1    0.0    0.0     0.0    0.0
+   r5.p1                  Main                    122           1    0.0    0.0     0.0    0.0
+    anySym                Main                    130           1    0.0    0.0     0.0    0.0
+  w                       Main                    108           1    0.0    0.0     0.0    0.0
+  main                    Main                    102           1    0.0    0.0    99.9  100.0
+   refine                 Main                    105           1    0.0    0.0    99.9  100.0
+    refine.renvs          Main                    106           1    0.0    0.0    99.9  100.0
+     ref                  Main                    107           8    0.0    0.0    99.9  100.0
+      ref.urs'            Main                    111           8    0.0    0.0    99.9  100.0
+       ref.urs'.\         Main                    112           8    0.0    0.0    99.9  100.0
+        ref.urs'.\.\      Main                    135           7    0.0    0.0     0.0    0.0
+         combine          Main                    136           7    0.0    0.0     0.0    0.0
+          combine.\       Main                    181           1    0.0    0.0     0.0    0.0
+           ==             Main                    182           1    0.0    0.0     0.0    0.0
+        ref.urs'.\.urs''  Main                    113           8    0.0    0.0    99.9  100.0
+         urePDeriv        Main                    114           8    0.0    0.0    99.9  100.0
+          urePDeriv.max_i Main                    147           6    0.1    0.0    99.5   99.9
+           getLabels      Main                    151        7943   56.2   69.3    97.9   99.3
+            showList      Main                    160           0    0.9    0.5    24.9   29.7
+             showsPrec    Main                    161      561971   24.0   29.2    24.0   29.2
+            getLabels.io  Main                    154         606    0.0    0.0    16.7    0.3
+             logger       Main                    155         606   16.7    0.3    16.7    0.3
+           apply          Main                    148       35032    0.9    0.2     1.6    0.6
+            apply.\       Main                    169        2345    0.0    0.0     0.0    0.0
+             annotate     Main                    170        2345    0.0    0.0     0.0    0.0
+            apply.r'      Main                    166       27095    0.0    0.0     0.1    0.0
+             apply'       Main                    167       27095    0.1    0.0     0.1    0.0
+            apply.apps    Main                    164       27095    0.2    0.2     0.2    0.2
+             apply.apps.\ Main                    186       27093    0.0    0.0     0.0    0.0
+             isRApp       Main                    165       29438    0.0    0.0     0.0    0.0
+            apply.r''     Main                    162       27095    0.1    0.0     0.3    0.2
+             app          Main                    163       54188    0.1    0.1     0.2    0.2
+              annotate    Main                    185       27093    0.0    0.0     0.0    0.0
+              app.is      Main                    183       27093    0.0    0.0     0.1    0.0
+               getLabel   Main                    184       27093    0.1    0.0     0.1    0.0
+            apply.adds    Main                    152       27095    0.1    0.0     0.1    0.0
+             apply.adds.\ Main                    171        2345    0.0    0.0     0.0    0.0
+             isRAdd       Main                    153       29438    0.0    0.0     0.0    0.0
+            apply'        Main                    150        7937    0.1    0.0     0.1    0.0
+            getLabel      Main                    149       35032    0.0    0.0     0.0    0.0
+          urPDeriv        Main                    119          24    0.0    0.0     0.0    0.0
+           inUR           Main                    145           6    0.0    0.0     0.0    0.0
+            lookupUR      Main                    146           6    0.0    0.0     0.0    0.0
+           urPDeriv.\     Main                    133           2    0.0    0.0     0.0    0.0
+           fv             Main                    129           3    0.0    0.0     0.0    0.0
+           limit          Main                    127          13    0.0    0.0     0.0    0.0
+            limit.\       Main                    128           1    0.0    0.0     0.0    0.0
+           urPDeriv.ur2   Main                    123          13    0.0    0.0     0.0    0.0
+            fv            Main                    126           1    0.0    0.0     0.0    0.0
+            limit         Main                    124          13    0.0    0.0     0.0    0.0
+             limit.\      Main                    125           1    0.0    0.0     0.0    0.0
+           posEmpty       Main                    121          29    0.0    0.0     0.0    0.0
+          apply           Main                    115        4048    0.1    0.0     0.3    0.1
+           apply.\        Main                    187         469    0.0    0.0     0.0    0.0
+            annotate      Main                    188         469    0.0    0.0     0.0    0.0
+           apply.r'       Main                    143        2960    0.0    0.0     0.1    0.0
+            apply'        Main                    144        2960    0.1    0.0     0.1    0.0
+           apply.apps     Main                    141        2960    0.0    0.0     0.0    0.0
+            apply.apps.\  Main                    193        2958    0.0    0.0     0.0    0.0
+            isRApp        Main                    142        3428    0.0    0.0     0.0    0.0
+           apply.r''      Main                    139        2960    0.0    0.0     0.1    0.0
+            app           Main                    140        5918    0.1    0.0     0.1    0.0
+             annotate     Main                    192        2958    0.0    0.0     0.0    0.0
+             app.is       Main                    190        2958    0.0    0.0     0.0    0.0
+              getLabel    Main                    191        2958    0.0    0.0     0.0    0.0
+           apply.adds     Main                    137        2960    0.1    0.0     0.1    0.0
+            apply.adds.\  Main                    189         469    0.0    0.0     0.0    0.0
+            isRAdd        Main                    138        3428    0.0    0.0     0.0    0.0
+           apply'         Main                    118        1087    0.0    0.0     0.0    0.0
+           getLabel       Main                    116        4048    0.0    0.0     0.0    0.0
+      ref.io              Main                    109           8    0.0    0.0     0.0    0.0
+       logger             Main                    110           8    0.0    0.0     0.0    0.0
+ CAF                      GHC.Conc.Signal          99           0    0.0    0.0     0.0    0.0
+ CAF                      GHC.IO.Encoding          92           0    0.0    0.0     0.0    0.0
+ CAF                      GHC.IO.Encoding.Iconv    90           0    0.0    0.0     0.0    0.0
+ CAF                      GHC.IO.Handle.FD         83           0    0.0    0.0     0.0    0.0
+ CAF                      GHC.Show                 77           0    0.0    0.0     0.0    0.0
+ CAF                      GHC.TopHandler           76           0    0.0    0.0     0.0    0.0
+ CAF                      Text.Read.Lex            67           0    0.0    0.0     0.0    0.0
