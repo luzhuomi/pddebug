@@ -80,12 +80,6 @@ The Refinement checking judgement
 > import Data.Maybe
 > import Data.Char
 
-
-> import Control.Monad.ST
-> import Data.STRef
-> import Control.Monad
- 
-
 > logger io = () -- unsafePerformIO io
 
  * The problem
@@ -182,15 +176,14 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >   | otherwise            = Pair l (simp r1) (simp r2)
 > simp (Choice l []) = Eps l
 > simp (Choice l [r]) = shift l r
-> {- simp (Choice l rs)  -- this will destroy the structure
+> simp (Choice l rs)
 >  | any isChoice rs =  
 >     Choice l $ 
 >        foldl (\rs-> \r-> case r of
 >                Choice l rs2 -> rs ++ (map (shift l) rs2)
 >                _            -> rs ++ [r])
->              [] rs 
->  | otherwise = Choice l $ nub $ filter (not.isPhi) $ map simp rs -}
-> simp (Choice l rs) = Choice l $ nub $ filter (not.isPhi) $ map simp rs
+>              [] rs
+>  | otherwise = Choice l $ nub $ filter (not.isPhi) $ map simp rs
 > simp (Star l1 (Eps l2)) = Eps $ collapse l1 l2 
 > simp (Star l1 (Star l2 r)) = Star (combine l1 l2) r 
 > simp (Star l r)
@@ -621,9 +614,6 @@ Note that from (Ind) the refinement environment \Psi is passed along
 >          | RApp Re RLevel
 >           deriving (Eq,Show)
 
-> reInROp :: ROp -> Re
-> reInROp (RAdd r _) = r
-> reInROp (RApp r _) = r
 
 > compareREnv :: REnv -> REnv -> Ordering
 > compareREnv r1 r2 = 
@@ -685,15 +675,15 @@ top level function
 > refine :: UReq -> Re -> [Char] -> [Re]
 > refine ureq r cs = 
 >   let renvs = nub $ sortBy compareREnv (ref [(ureq, r, IM.empty)] cs)
->   in  map (\renv ->  apply_ renv r)  renvs
+>   in  map (\renv -> apply renv r)  renvs
 
 the main routine
 
 > ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
-> ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply_` r) ] ++ 
+> ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply` r) ] ++ 
 >              [ extend renv (getLabel r) (RAdd (Eps dontcare) Strong) -- try to fix those states which are non-final?
 >                     | (ureq, r, renv) <- urs
->                     , not (posEmpty (renv `apply_` r))
+>                     , not (posEmpty (renv `apply` r))
 >                     , any (\i -> case lookupUR i ureq of
 >                                  { Nothing -> False
 >                                  ; Just t  -> posEmpty t }) (getLabel r) ]
@@ -719,10 +709,7 @@ the main routine
 
 > urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
 > urePDeriv (ur, r, psi) l = let max_i = maximum $ getLabels r -- pre-cond: psi has been applied to r
->                                (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
->                            in [ (ur', run_ e (psi' `apply` r'), psi') | (ur', r', psi') <- t ]
-
-
+>                            in [ (ur', psi' `apply` r', psi') | (ur', r', psi') <- urPDeriv (ur, r) l Weak (max_i + 1) ]
 
 
 finding the maximal among two RLevels
@@ -732,138 +719,65 @@ finding the maximal among two RLevels
 > maximal _ Strong = Strong
 > maximal _ _ = Weak
 
-> newtype State s a = State { runState :: (s -> (a,s)) } 
- 
-> instance Monad (State s) where
->   return a        = State (\s -> (a,s))
->   (State x) >>= f = State (\s -> let (a,s') = x s 
->                                      stb = f a
->                                  in (runState stb) s')
-
-> run :: s -> State s a -> (a,s)
-> run s sta = (runState sta) s
-
-
-> run_ :: s -> State s a -> a
-> run_ s sta = fst $ run s sta
-
-> data Env = Env { maxId :: Int
->                } deriving Show
-
-> setMaxId :: Int -> State Env ()
-> setMaxId i = State (\env -> let env' = env{maxId = i}
->                             in ((), env'))
-
-
-> getMaxId :: State Env Int
-> getMaxId = State (\env -> (maxId env,env))
-
-> incMaxId :: State Env Int
-> incMaxId = do 
->  { max_i <- getMaxId 
->  ; let next_i = max_i + 1
->  ; setMaxId next_i                    
->  ; return next_i 
->  }
-
-
-> urPDeriv :: (UReq, Re) -> Char -> RLevel -> State Env [(UReq, Re, REnv)]
-> urPDeriv (ur, Eps (i:is)) l rlvl
->   | i `inUR` ur = do 
->      { next_i <- incMaxId
->      ; return [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
->                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ] 
->      }
->   | otherwise   = do 
->      { next_i <- incMaxId 
->      ; return [ (ur, Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) (maximal rlvl Weak)]) ]
->      }
-> urPDeriv (ur, (Ch (i:is) l)) l' rlvl = 
+> urPDeriv :: (UReq, Re) -> Char -> RLevel -> Int -> [(UReq, Re, REnv)]
+> urPDeriv (ur, Eps (i:is)) l rlvl next_i 
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
+>                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
+>   | otherwise   = [ (ur, Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) (maximal rlvl Weak)]) ]
+> urPDeriv (ur, (Ch (i:is) l)) l' rlvl next_i  = 
 >   case lookup i ur of 
->     { Just r | l == l' -> do 
->       { next_i <- incMaxId
->       ; return  [ ((updateUR i r' ur), (Eps [next_i]), IM.empty ) 
->                          | r' <- pderiv r l ]
->       }
->              | l /= l' -> do 
->       { next_i <- incMaxId
->       ; next_i2 <- incMaxId
->       ; return  [ ((updateUR i r' ur), (Eps [next_i]), IM.singleton i [RAdd (Ch [next_i2] l') Strong]) | r' <- pderiv r l]
->       }
->     ; Nothing | l == l' -> do 
->       { next_i <- incMaxId  
->       ; return [ (ur, Eps [next_i], IM.empty ) ]
->       }
->               | l /= l' -> do 
->       { next_i <- incMaxId
->       ; next_i2 <- incMaxId
->       ; return [ (ur, Eps [next_i], IM.singleton i [RAdd (Ch [next_i2] l') (maximal rlvl Weak)] ) ] 
->       }
+>     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps [-i]), IM.empty ) 
+>                            | r' <- pderiv r l ]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps [-i]), IM.singleton i [RAdd (Ch [next_i] l') Strong]) | r' <- pderiv r l]
+>     ; Nothing | l == l' -> [ (ur, Eps [-i], IM.empty ) ]
+>               | l /= l' -> [ (ur, Eps [-i], IM.singleton i [RAdd (Ch [next_i] l') (maximal rlvl Weak)] ) ] 
 >     }
-> urPDeriv (ur, Pair (i:is) r1 r2) l rlvl =
+>  {-  
+>   case lookup i ur of 
+>     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty ) 
+>                            | r' <- pderiv r l ]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [next_i] l') Strong]) | r' <- pderiv r l]
+>     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [next_i] l') (maximal rlvl Weak)] ) ] 
+>     }
+>  -}
+> urPDeriv (ur, Pair (i:is) r1 r2) l rlvl next_i  =
 >    case lookup i ur of 
 >     { Just p -> 
 >         case pderiv p l of
->           { [] -> return [] 
->           ; ps  | posEmpty r1 -> do 
->               { let ur2 =  ur `limit` fv r2 
->               ; t1 <- urPDeriv (ur `limit` (fv r1), r1) l Strong 
->               ; t2 <- urPDeriv (ur2, r2) l Strong
->               ; return $ [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1 ] ++ t2
->               } 
->                 | otherwise   -> do 
->               { let ur2 =  ur `limit` fv r2 
->               ; t1 <-  urPDeriv (ur `limit` (fv r1), r1) l Strong 
->               ; return [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1] 
->               }
+>           { [] -> [] 
+>           ; ps  | posEmpty r1 -> let ur2 =  ur `limit` fv r2 
+>                                  in ur2 `seq` [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i ] ++ (urPDeriv (ur2, r2) l Strong next_i)
+>                 | otherwise   -> let ur2 =  ur `limit` fv r2 
+>                                  in ur2 `seq` [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l Strong next_i] 
 >           }
->     ; Nothing | posEmpty r1 -> do 
->           { let ur2 =  ur `limit` fv r2 
->           ; t1 <- urPDeriv (ur `limit` (fv r1), r1) l rlvl
->           ; t2 <- urPDeriv (ur2, r2) l rlvl 
->           ; return $ [ ((ur' ++ ur2) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <-  t1 ] ++ t2
->           }
->               | otherwise   -> do 
->           { t1 <- urPDeriv (ur `limit` (fv r1), r1) l rlvl
->           ; return [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1 ]
->           }
+>     ; Nothing | posEmpty r1 -> let ur2 =  ur `limit` fv r2 
+>                                in ur2 `seq`  [ ((ur' ++ ur2) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ] ++ (urPDeriv (ur2, r2) l rlvl next_i)
+>               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l rlvl next_i ]
 >     }
-> urPDeriv (ur, Choice (i:is) rs) l rlvl = 
+> urPDeriv (ur, Choice (i:is) rs) l rlvl next_i = 
 >    case lookup i ur of
 >      { Just p ->  
 >          case pderiv p l of
->          { [] -> return []
->          ; ps -> do 
->             { let ur' = updateUR i (Choice dontcare ps) ur
->             ; ts <- mapM (\ r -> urPDeriv (ur', r) l Strong) rs
->             ; return $ concat ts 
->             -- todo:move i:is to each r
->             }
+>          { [] -> []
+>          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
+>                  in concatMap (\ r -> urPDeriv (ur', r) l Strong next_i) rs -- todo:move i:is to each r
 >          }
->      ; Nothing -> do 
->          { ts <- mapM (\ r -> urPDeriv (ur, r) l rlvl) rs
->          ; return $ concat ts
->          }
+>      ; Nothing -> concatMap (\ r -> urPDeriv (ur, r) l rlvl next_i) rs 
 >      }
-> urPDeriv (ur, Star (i:is) r) l rlvl  = 
+> urPDeriv (ur, Star (i:is) r) l rlvl next_i = 
 >     case lookup i ur of 
 >       { Just p -> 
 >          case pderiv p l of
->          { [] -> return []
->          ; ps -> do 
->             { let ur' = updateUR i (Choice dontcare ps) ur
->             ; t <- urPDeriv (ur',r) l Strong
->             ; return [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur'', r', renv) <- t ]
->             }
+>          { [] -> []
+>          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
+>                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
+>                        | (ur'', r', renv) <- urPDeriv (ur',r) l Strong next_i ]
 >          }
->       ; Nothing -> do 
->            { t <- urPDeriv (ur,r) l rlvl
->            ; return [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur', r', renv) <- t ]
->            }
+>       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
+>                        | (ur', r', renv) <- urPDeriv (ur,r) l rlvl next_i ]
 >       }
-> urPDeriv ur c rlvl  = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
+> urPDeriv ur c rlvl next_i = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
 
 
 
@@ -995,45 +909,29 @@ retrict the user req based on a set of labels
 applying REnv to a Re
 
 
-> apply_ :: REnv -> Re -> Re 
-> apply_ renv r = let is = concatMap (getLabels . reInROp) (concatMap snd (IM.toList renv))
->                     max_i = maximum $ (getLabels r) --  ++ is
->                 in run_ (Env max_i) (apply renv r)
-
-> apply :: REnv -> Re -> State Env Re 
+> apply :: REnv -> Re -> Re 
 > apply renv s = 
->   let r = simp  s
+>   let r = simp s
 >   in case getLabel r of 
 >                {  (i:is) -> -- The first one is always the orginal label annotated to the regexp. The tail could contain those being collapsed because of pderiv op
 >                  case IM.lookup i renv of 
->                    { Just rs -> do 
->                          { r' <- apply' renv r
->                          ; let adds = map (\ (RAdd t _ ) -> t) $ filter isRAdd rs
->                                rs'  = filter isRApp rs
->                          ; apps <- mapM (\ (RApp t _ ) -> apply renv t) rs'
->                          ; let r''  = app r' apps 
->                          ; case adds of 
->                             { (_:_) -> do 
->                               { next_i <- incMaxId 
->                               ; return $ Choice (i:is) ((annotate [next_i] r''):adds)
->                               }
->                             ; [] -> return r'' }
->                          }
+>                    { Just rs -> let r' = apply' renv r
+>                                     adds = map (\ (RAdd t _ ) -> t) $ filter isRAdd rs
+>                                     apps = map (\ (RApp t _ ) -> apply renv t) $ filter isRApp rs
+>                                     r''  = app r' apps 
+>                                 in case adds of 
+>                                    { (_:_) -> Choice (i:is) (r'':(map (\t -> {- annotate (i:is) -} t) adds))
+>                                    ; [] -> r'' }
 >                    ; Nothing -> apply' renv r
 >                    }
 >                ; [] -> error ("apply: getLabel is applied to a regular ex which has no label. " ++ (show r))
 >                }
 
-> apply' :: REnv -> Re -> State Env Re
-> apply' renv (Pair is r1 r2) = do { r1' <- apply renv r1 
->                                  ; r2' <- apply renv r2 
->                                  ; return $ Pair is r1' r2' }
-> apply' renv (Choice is rs) = do { rs' <- mapM (apply renv) rs
->                                 ; return $ Choice is rs' 
->                                 }
-> apply' renv (Star is r) = do { r' <- apply renv r
->                              ; return $ Star is r' }
-> apply' _ r = return r
+> apply' :: REnv -> Re -> Re
+> apply' renv (Pair is r1 r2) = Pair is (apply renv r1) (apply renv r2)
+> apply' renv (Choice is rs) = Choice is (map (apply renv) rs)
+> apply' renv (Star is r) = Star is (apply renv r)
+> apply' _ r = r
 
 > app :: Re -> [Re] -> Re
 > app r [] = r
