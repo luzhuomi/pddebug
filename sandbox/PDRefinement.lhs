@@ -589,6 +589,37 @@ g3 = [(1::Int, [0-9]+)]
 >         p5 = Star [70] (anySym 80)
 > g3 = [(50::Int, (anyNum 90))]
 
+
+
+w1 = (A)
+r6 = <(A|B)*>
+
+> w1 = "(A)"
+> r6 = Pair [0] 
+>       (Ch [1] '<') 
+>       (Pair [2] (Star [3] (Choice [4] [(Ch [5] 'A'),(Ch [6] 'B')]))
+>           (Ch [7] '>'))
+> g4 = [(3::Int, r1)]
+
+*Main> ref' [(g4,r6,IM.empty)] w1
+Loading package array-0.4.0.0 ... linking ... done.
+Loading package deepseq-1.3.0.0 ... linking ... done.
+Loading package containers-0.4.2.1 ... linking ... done.
+[(Eps [10],fromList [(1,[RAdd (Ch [9] '(') Weak]),(7,[RAdd (Ch [11] ')') Weak])]),(Eps [15],fromList [(1,[RAdd (Ch [9] '(') Weak]),(6,[RAdd (Ch [11] 'A') Strong]),(7,[RAdd (Ch [16] ')') Weak])]),(Eps [13],fromList [(1,[RAdd (Ch [9] '(') Weak]),(7,[RAdd (Ch [13] 'A') Weak]),(12,[RApp (Ch [13] ')') Weak])])]
+*Main> let es = ref' [(g4,r6,IM.empty)] w1
+                                                                                                                                                                                    
+*Main> map (\e ->  apply_ (snd e) r6) es !! 0
+Pair [0] (Choice [1] [Ch [8] '<',Ch [9] '(']) (Pair [2] (Star [3] (Choice [4] [Ch [5] 'A',Ch [6] 'B'])) (Choice [7] [Ch [9] '>',Ch [11] ')']))
+*Main> map (\e ->  apply_ (snd e) r6) es !! 1
+Pair [0] (Choice [1] [Ch [8] '<',Ch [9] '(']) (Pair [2] (Star [3] (Choice [4] [Ch [5] 'A',Choice [6] [Ch [9] 'B',Ch [11] 'A']])) (Choice [7] [Ch [10] '>',Ch [16] ')']))
+*Main> map (\e ->  apply_ (snd e) r6) es !! 2
+Pair [0] (Choice [1] [Ch [8] '<',Ch [9] '(']) (Pair [2] (Star [3] (Choice [4] [Ch [5] 'A',Ch [6] 'B'])) (Choice [7] [Ch [9] '>',Ch [13] 'A']))
+*Main> map (\e ->  apply_ (snd e) r6) es !! 3
+*** Exception: Prelude.(!!): index too large
+
+
+
+
 > main :: IO ()
 > main = do 
 >   [si] <- getArgs
