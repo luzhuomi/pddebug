@@ -673,111 +673,27 @@ Note that from (Ind) the refinement environment \Psi is passed along
 
 > type REnv = IM.IntMap [ROp]
 
-> data ROp = RATr Re RLevel  -- add transition
->          | RASt Re RLevel  -- add state
->          | RNoCh RLevel     -- no change
+> data ROp = RAdd Re RLevel 
+>          | RApp Re RLevel
 >           deriving (Eq,Show)
 
-> reInROp :: ROp -> Maybe Re
-> reInROp (RATr r _) = Just r
-> reInROp (RASt r _) = Just r
-> reInROp (RNoCh _) = Nothing
-
-
-
+> reInROp :: ROp -> Re
+> reInROp (RAdd r _) = r
+> reInROp (RApp r _) = r
 
 > compareREnv :: REnv -> REnv -> Ordering
-> compareREnv r2 r1 = 
->   let sTr1 = countStrongATr r1  
->       sTr2 = countStrongATr r2
->       sSt1 = countStrongASt r1
->       sSt2 = countStrongASt r2
->       sNC1 = countStrongNoCh r1
->       sNC2 = countStrongNoCh r2
-
->       wTr1 = countWeakATr r1  
->       wTr2 = countWeakATr r2
->       wSt1 = countWeakASt r1
->       wSt2 = countWeakASt r2
->       wNC1 = countWeakNoCh r1
->       wNC2 = countWeakNoCh r2
-
->   in case compare sNC1 sNC2 of 
->      { EQ -> case compare sTr1 sTr2 of
->         { EQ -> case compare sSt1 sSt2 of
->           { EQ -> case compare wNC1 wNC2 of
->             { EQ -> compare wTr1 wTr2
->             ; others -> others }  
->           ; others -> others }
->         ; others -> others }
->      ; others  -> others }
-
-
-count the number of ROps in renv
-
-> renvSize :: REnv -> Int
-> renvSize renv = sum (map (\ (k,v) -> length v) (IM.toList renv))
-
-> renvStrong :: REnv -> Int
-> renvStrong renv = sum (map (\ (k,v) -> length (filter isStrong v)) (IM.toList renv))
-
-> renvWeak :: REnv -> Int
-> renvWeak renv = sum (map (\ (k,v) -> length (filter isWeak v)) (IM.toList renv))
-
-> renvRASt :: REnv -> Int
-> renvRASt renv = sum (map (\ (k,v) -> length (filter isRASt v)) (IM.toList renv))
-
-> countStrongATr :: REnv -> Int 
-> countStrongATr renv = sum (map (\ (k,v) -> length (filter (\x -> (isStrong x) && (isRATr x)) v)) (IM.toList renv))
-
-> countStrongASt :: REnv -> Int 
-> countStrongASt renv = sum (map (\ (k,v) -> length (filter (\x -> (isStrong x) && (isRASt x)) v)) (IM.toList renv))
-
-> countStrongNoCh :: REnv -> Int 
-> countStrongNoCh renv = sum (map (\ (k,v) -> length (filter (\x -> (isStrong x) && (isRNoCh x)) v)) (IM.toList renv))
-
-
-> countWeakATr :: REnv -> Int 
-> countWeakATr renv = sum (map (\ (k,v) -> length (filter (\x -> (isWeak x) && (isRATr x)) v)) (IM.toList renv))
-
-> countWeakASt :: REnv -> Int 
-> countWeakASt renv = sum (map (\ (k,v) -> length (filter (\x -> (isWeak x) && (isRASt x)) v)) (IM.toList renv))
-
-> countWeakNoCh :: REnv -> Int 
-> countWeakNoCh renv = sum (map (\ (k,v) -> length (filter (\x -> (isWeak x) && (isRNoCh x)) v)) (IM.toList renv))
-
-                         
-                         
-> isStrong :: ROp -> Bool
-> isStrong (RATr _ Strong) = True                         
-> isStrong (RATr _ _) = False
-> isStrong (RASt _ Strong) = True                         
-> isStrong (RASt _ _) = False
-> isStrong (RNoCh Strong) = True                         
-> isStrong (RNoCh _) = False
-
-> isWeak :: ROp -> Bool
-> isWeak (RATr _ Weak) = True                         
-> isWeak (RATr _ _) = False
-> isWeak (RASt _ Weak) = True                         
-> isWeak (RASt _ _) = False
-> isWeak (RNoCh Weak) = True                         
-> isWeak (RNoCh _) = False
-
-> isRATr :: ROp -> Bool
-> isRATr (RATr _ _) = True
-> isRATr _ = False
-
-> isRASt :: ROp -> Bool
-> isRASt (RASt _ _) = True
-> isRASt _ = False
-
-> isRNoCh :: ROp -> Bool
-> isRNoCh (RNoCh _) = True
-> isRNoCh _ = False
-                       
-                       
-> data RLevel = Strong | Weak deriving (Ord, Eq, Show)
+> compareREnv r1 r2 = 
+>   let s1 = renvSize r1  
+>       s2 = renvSize r2 
+>   in case compare s1 s2 of 
+>       EQ -> let w1 = renvWeak r1
+>                 w2 = renvWeak r2
+>             in case compare w1 w2 of
+>                EQ -> let a1 = renvRApp r1
+>                          a2 = renvRApp r2
+>                      in compare a1 a2
+>                _ -> compare w1 w2
+>       _  -> compare s1 s2
 
 
 renv_1 \entails renv_2 iff 
@@ -795,7 +711,46 @@ renv_1 \entails renv_2 iff
 > ropSubsume :: [ROp] -> [ROp] -> Bool
 > ropSubsume rs1 rs2 = all (\r2 -> r2 `elem` rs1) rs2
 
+count the number of ROps in renv
 
+> renvSize :: REnv -> Int
+> renvSize renv = sum (map (\ (k,v) -> length v) (IM.toList renv))
+
+> renvStrong :: REnv -> Int
+> renvStrong renv = sum (map (\ (k,v) -> length (filter isStrong v)) (IM.toList renv))
+
+> renvWeak :: REnv -> Int
+> renvWeak renv = sum (map (\ (k,v) -> length (filter isWeak v)) (IM.toList renv))
+
+> renvRApp :: REnv -> Int
+> renvRApp renv = sum (map (\ (k,v) -> length (filter isRApp v)) (IM.toList renv))
+
+                         
+                         
+> isStrong :: ROp -> Bool
+> isStrong (RAdd _ Strong) = True                         
+> isStrong (RAdd _ _) = False
+> isStrong (RApp _ Strong) = True                         
+> isStrong (RApp _ _) = False
+
+
+> isWeak :: ROp -> Bool
+> isWeak (RAdd _ Weak) = True                         
+> isWeak (RAdd _ _) = False
+> isWeak (RApp _ Weak) = True                         
+> isWeak (RApp _ _) = False
+
+> isRAdd :: ROp -> Bool
+> isRAdd (RAdd _ _) = True
+> isRAdd _ = False
+
+> isRApp :: ROp -> Bool
+> isRApp (RApp _ _) = True
+> isRApp _ = False
+
+                       
+                       
+> data RLevel = Strong | Weak deriving (Ord, Eq, Show)
 
 top level function
 
@@ -808,7 +763,7 @@ the main routine
 
 > ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
 > ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply_` r) ] ++ 
->              [ extend renv (getLabel r) (RATr (Eps dontcare) Strong) -- try to fix those states which are non-final?
+>              [ extend renv (getLabel r) (RAdd (Eps dontcare) Strong) -- try to fix those states which are non-final?
 >                     | (ureq, r, renv) <- urs
 >                     , not (posEmpty (renv `apply_` r))
 >                     , any (\i -> case lookupUR i ureq of
@@ -817,7 +772,7 @@ the main routine
 > ref urs (l:w) = let io = logger (print (l:w)) 
 >                     urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
->                                     in  {- prune $ -} map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
+>                                     in  prune $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
 >                 in io `seq` ref urs' w
 
 
@@ -941,34 +896,34 @@ finding the maximal among two RLevels
 >   | i `inUR` ur = do 
 >      { next_i <- incMaxId
 >        -- let next_i  = i  
->      ; return [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RASt (Ch [next_i] l) Strong]) 
+>      ; return [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ] 
 >      }
 >   | otherwise   = do 
 >      { next_i <- incMaxId 
 >        -- let next_i  = i    
->      ; return [ (ur, Eps [next_i], IM.singleton i [RASt (Ch [next_i] l) (maximal rlvl Weak)]) ]
+>      ; return [ (ur, Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) (maximal rlvl Weak)]) ]
 >      }
 > urPDeriv (ur, (Ch (i:is) l)) l' rlvl = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> do 
 >       { -- next_i <- incMaxId
->       ; return  [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RNoCh Strong] )
+>       ; return  [ ((updateUR i r' ur), (Eps (i:is)), IM.empty ) 
 >                          | r' <- pderiv r l ]
 >       }
 >              | l /= l' -> do 
 >       { -- next_i <- incMaxId
 >       ; next_i2 <- incMaxId
->       ; return  [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RATr (Ch [next_i2] l') Strong]) | r' <- pderiv r l]
+>       ; return  [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [next_i2] l') Strong]) | r' <- pderiv r l]
 >       }
 >     ; Nothing | l == l' -> do 
 >       { -- next_i <- incMaxId  
->       ; return [ (ur, Eps (i:is), IM.singleton i [RNoCh (maximal rlvl Weak)] ) ]
+>       ; return [ (ur, Eps (i:is), IM.empty ) ]
 >       }
 >               | l /= l' -> do 
 >       { -- next_i <- incMaxId
 >       ; next_i2 <- incMaxId
->       ; return [ (ur, Eps (i:is), IM.singleton i [RATr (Ch [next_i2] l') (maximal rlvl Weak)] ) ] 
+>       ; return [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [next_i2] l') (maximal rlvl Weak)] ) ] 
 >       }
 >     }
 > urPDeriv (ur, Pair (i:is) r1 r2) l rlvl =
@@ -1042,16 +997,16 @@ finding the maximal among two RLevels
 > {- replaced by the above forumation, combining urPDeriv and urPDerivS by parameterizing S
 > urPDeriv :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
 > urPDeriv (ur, Eps (i:is)) l next_i
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RASt (Ch [next_i] l) Strong]) 
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, Eps [next_i], IM.singleton i [RASt (Ch [next_i] l) Weak]) ]
+>   | otherwise   = [ (ur, Eps [next_i], IM.singleton i [RApp (Ch [next_i] l) Weak]) ]
 > urPDeriv (ur, (Ch (i:is) l)) l' next_i = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
 >                            | r' <- pderiv r l ]
->              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RATr (Ch [next_i] l') Strong]) | r' <- pderiv r l]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [next_i] l') Strong]) | r' <- pderiv r l]
 >     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
->               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RATr (Ch [next_i] l') Weak] ) ] 
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [next_i] l') Weak] ) ] 
 >     }
 > urPDeriv (ur, Pair (i:is) r1 r2) l next_i =
 >    case lookup i ur of 
@@ -1093,16 +1048,16 @@ urPDeriv with Strong recommendation
 
 > urPDerivS :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
 > urPDerivS (ur, Eps (i:is)) l next_i
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RASt (Ch [ next_i] l) Strong]) 
+>   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RApp (Ch [ next_i] l) Strong]) 
 >                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, (Eps [next_i]), IM.singleton i [RASt (Ch [ next_i] l) Strong]) ]
+>   | otherwise   = [ (ur, (Eps [next_i]), IM.singleton i [RApp (Ch [ next_i] l) Strong]) ]
 > urPDerivS (ur, (Ch (i:is) l)) l'  next_i = 
 >   case lookup i ur of 
 >     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
 >                            | r' <- pderiv r l ]
->              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RATr (Ch [ next_i] l') Strong]) | r' <- pderiv r l]
+>              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RAdd (Ch [ next_i] l') Strong]) | r' <- pderiv r l]
 >     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
->               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RATr (Ch [ next_i] l') Strong] ) ] 
+>               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RAdd (Ch [ next_i] l') Strong] ) ] 
 >     }
 > urPDerivS (ur, Pair (i:is) r1 r2) l  next_i =
 >    case lookup i ur of 
@@ -1167,7 +1122,7 @@ applying REnv to a Re
 
 
 > apply_ :: REnv -> Re -> Re 
-> apply_ renv r = let is = concatMap (getLabels . fromJust . reInROp) (concatMap snd (IM.toList renv)) -- fixme fromJust
+> apply_ renv r = let is = concatMap (getLabels . reInROp) (concatMap snd (IM.toList renv))
 >                     max_i = maximum $ (getLabels r) --  ++ is
 >                 in run_ (Env max_i) (apply renv r)
 
@@ -1179,9 +1134,9 @@ applying REnv to a Re
 >                  case IM.lookup i renv of 
 >                    { Just rs -> do 
 >                          { r' <- apply' renv r
->                          ; let adds = map (\ (RATr t _ ) -> t) $ filter isRATr rs
->                                rs'  = filter isRASt rs
->                          ; apps <- mapM (\ (RASt t _ ) -> apply renv t) rs'
+>                          ; let adds = map (\ (RAdd t _ ) -> t) $ filter isRAdd rs
+>                                rs'  = filter isRApp rs
+>                          ; apps <- mapM (\ (RApp t _ ) -> apply renv t) rs'
 >                          ; let r''  = app r' apps 
 >                          ; case adds of 
 >                             { (_:_) -> do 
@@ -1217,11 +1172,11 @@ applying REnv to a Re
 
 > extend :: REnv -> [Int] -> ROp -> REnv
 > extend renv [] _ = renv
-> extend renv (i:_) e@(RATr r lvl) = -- we only care about the original label
+> extend renv (i:_) e@(RAdd r lvl) = -- we only care about the original label
 >      case IM.lookup i renv of 
->       { Just rs | not (e `elem` rs) ->  IM.adjust (\_ -> rs++[RATr r lvl]) i renv 
+>       { Just rs | not (e `elem` rs) ->  IM.adjust (\_ -> rs++[RAdd r lvl]) i renv 
 >                 | otherwise -> renv
->       ; Nothing -> IM.insert i [RATr r lvl] renv
+>       ; Nothing -> IM.insert i [RAdd r lvl] renv
 >       }
 
 
