@@ -179,6 +179,9 @@ containment check
 >    }
 > deriv r l = Choice dontcare (pderiv r l)
 
+> equiv :: Re -> Re -> Bool
+> equiv r1 r2 = r1 `contain` r2 && r2 `contain` r1
+
 
 simplification 
 
@@ -683,7 +686,18 @@ Note that from (Ind) the refinement environment \Psi is passed along
 > reInROp (RASt r _) = Just r
 > reInROp (RNoCh _) = Nothing
 
+> resInROps :: [ROp] -> [Re]
+> resInROps [] = []
+> resInROps ((RATr r _):rops) = r:(resInROps rops)
+> resInROps ((RASt r _):rops) = r:(resInROps rops)
+> resInROps ((RNoCh  _):rops) = resInROps rops
 
+
+> resInREnv :: REnv -> [Re]
+> resInREnv renv = 
+>   resInROps $ concat $ map snd (IM.toList renv)
+
+        
 
 
 > compareREnv :: REnv -> REnv -> Ordering
@@ -817,7 +831,7 @@ the main routine
 > ref urs (l:w) = let io = logger (print (l:w)) 
 >                     urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
->                                     in  {- prune $ -} map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
+>                                     in  prune3 r $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
 >                 in io `seq` ref urs' w
 
 
@@ -828,27 +842,27 @@ the main routine
 > ref' urs (l:w) = let 
 >                      urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
->                                     in  {- prune $ -} map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
+>                                     in  prune3 r $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
 >                  in ref' urs' w
 
 pruning by checking for entailment among REnvs, looking for local optimal
 
-this pruning is not work. see
+this pruning is not working. see
 
 (A+B)*(B)(C*)
 
-matching DDC
+matching "DDC"
 
-where UReq = 3:C*
+where UReq = [(3, C*)]
 
-rops_1 = [(0, add D), (0, add C)]
+rops_1 = [(0, ATr D), (0, ATr C)]
 
-rops_2 = [(0, add D), (1, add D)]
+rops_2 = [(0, ATr D), (1, ATr D)]
 
 rops_2 should be favored because C is matched with 3 which is under the UReq
 
 however, with this pruning scheme, rops_2 is pruned at the 2nd D input character, before the 'C' is considered.
-as rops_1 = [(0, add D) ]  is entailed by rops_2 = [(0, add D), (1, add D)] 
+as rops_1 = [(0, ATr D) ]  is entailed by rops_2 = [(0, ATr D), (1, ATr D)] 
 
 
 > prune :: [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
@@ -867,29 +881,67 @@ as rops_1 = [(0, add D) ]  is entailed by rops_2 = [(0, add D), (1, add D)]
 
 
 
-
-> ref'' :: Re -> [(UReq, Re, REnv)] -> [Char] -> [(Re,REnv)]
-> ref'' r urs [] = [ (r,renv) | (ureq, r, renv) <- urs ] 
-> ref'' r urs (l:w) = let 
->                         urs' = concatMap (\ (ur,r,renv) -> 
->                                     let urs'' = urePDeriv (ur, r, renv) l
->                                     in  prune2 r $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
->                     in ref'' r urs' w
+prune by semantic equivalent 
 
 
 > prune2 :: Re -> [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
 > prune2 r [] = []
 > prune2 r (x:xs) | any (\y -> containGTE r x y) xs = prune2 r xs
->                 | otherwise = (x:(prune' xs))
+>                 | otherwise = x:(prune2 r xs)
 >   where containGTE r x y = let ex = trd x 
 >                                ey = trd y                                
->                           in (apply_ ex r) `contain` (apply_ ey r) && (compareREnv ex ey >= EQ) 
+>                            in (apply_ ex r) `equiv` (apply_ ey r) && (compareREnv ex ey >= EQ) 
+
+
+
+prune by isomorphism.
+
+Let r be a regular expression, (l1, rops1) and (l2, rops2) Label-ROp pairs, they are considered iso w.r.t to r iff
+   1) l1 == l2 and rops1 == rops2 or
+   2) l1 and l2 are labels of the two alternatives of the choice sub-exp in r
+
+e.g. r = (Choice [1] (Ch [2] 'A') (Ch [3] 'B'))
+
+ (2, ATr (Ch [4] 'C')) and (3, ATr (Ch [5] 'C')) are considered iso w.r.t to r.
+
+Rationale: applying the above two operations lead to the semantically equivalent regex
+
+> prune3 :: Re -> [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
+> prune3 r [] = [] 
+> prune3 r (x:xs) | any (\y -> iso r (trd x) (trd y)) xs = prune3 r xs
+>                 | otherwise = x:(prune3 r xs)
+>   where iso r renv_x renv_y 
+>           | (IM.size renv_x /= IM.size renv_y) = False
+>           | otherwise =  
+>               let ps1 = IM.toList renv_x
+>                   ps2 = IM.toList renv_y
+>               in isoPairs r ps1 ps2
+>         isoPairs r [] [] = True
+>         isoPairs r _  [] = False
+>         isoPairs r [] _  = False
+>         isoPairs r ((lx,x):xs) ((ly,y):ys)  -- assumption, IM.toList sort by the keys
+>            | lx == ly  = (x == y) && (isoPairs r xs ys)
+>            | choiceAlts r lx ly = (x == y) && (isoPairs r xs ys)
+>            | otherwise = False
+
+check whether the two labels are siblings under the choice sub-exp in r
+
+> choiceAlts :: Re -> Int -> Int -> Bool 
+> choiceAlts (Choice _ rs) x y = 
+>      let ls = concatMap getLabels rs  
+>      in x `elem` ls && y `elem` ls
+> choiceAlts (Pair _ r1 r2) x y = choiceAlts r1 x y || choiceAlts r2 x y
+> choiceAlts (Star _ r) x y  = choiceAlts r x y 
+> choiceAlts (Ch _ _) _ _ = False
+> choiceAlts (Eps _ ) _ _ = False
+> choiceAlts Phi      _ _ = False
 
 
 > urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
-> urePDeriv (ur, r, psi) l = let max_i = maximum $ getLabels r -- pre-cond: psi has been applied to r
->                                (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
->                            in [ (ur', run_ e (psi' `apply` r'), psi') | (ur', r', psi') <- t ]
+> urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of the labels DO NOT appear in r, because r is just a partial derivatives!
+>   let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
+>       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
+>   in [ (ur', run_ e (psi' `apply` r'), psi') | (ur', r', psi') <- t ]
 
 
 
@@ -1167,8 +1219,8 @@ applying REnv to a Re
 
 
 > apply_ :: REnv -> Re -> Re 
-> apply_ renv r = let is = concatMap (getLabels . fromJust . reInROp) (concatMap snd (IM.toList renv)) -- fixme fromJust
->                     max_i = maximum $ (getLabels r) --  ++ is
+> apply_ renv r = let is = concatMap getLabels $ resInROps (concatMap snd (IM.toList renv)) -- fixme fromJust
+>                     max_i = maximum $ (getLabels r) ++ is
 >                 in run_ (Env max_i) (apply renv r)
 
 > apply :: REnv -> Re -> State Env Re 
