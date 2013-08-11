@@ -463,7 +463,12 @@ The second property ensures that if $w$ is not in $r$, the replacement shall hav
  ----------------------------- (pExist)
   \gamma, r^i \vdash d : r'^i
 
-> replacement = undefined       
+> replacement ureq r w r' = 
+>    let ls = getLabels r  
+>        ls'  = getLabels r'          
+>    in ls == ls' && 
+>      ( undefined
+>      )
 
 
    i \not \in dom(\gamma)
@@ -595,7 +600,7 @@ t3 = .+
 
 w = <h><d>65103020</d></h>
 r5 = .*<s>([0-9]+)</s>.*
-g3 = [(1::Int, [0-9]+)]
+g5 = [(1::Int, [0-9]+)]
 
 
 > anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) ([47,60,62] ++ [100,104])) -- [97..122]))
@@ -611,7 +616,7 @@ g3 = [(1::Int, [0-9]+)]
 >         p3 = Star [50] (anyNum 51)
 >         p4 = Pair [61] (Ch [62] '<') (Pair [63] (Ch [64] '/') (Pair [65] (Ch [66] 's') (Ch [67] '>')))
 >         p5 = Star [70] (anySym 80)
-> g3 = [(50::Int, Pair [] (anyNum 90) (Star [] (anyNum 90)))]
+> g5 = [(50::Int, Pair [] (anyNum 90) (Star [] (anyNum 90)))]
 
 
 
@@ -629,6 +634,13 @@ r6 = <(A|B)*>
 
 w2 = (A)
 r7 = .*<(A|B)*>.*
+
+there are still some space for pruning
+sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") !! 0
+sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") !! 1
+sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") !! 2
+sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") !! 3
+sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") !! 4
 
 > w2 = "(A)"
 > r7 = Pair [-10]
@@ -652,7 +664,7 @@ r7 = .*<(A|B)*>.*
 > main = do 
 >   [si] <- getArgs
 >   let i = read si
->   print $ (refine g3 r5 w) !! i
+>   print $ (refine g5 r5 w) !! i
 
 
 New idea: refinement algo takes ureq re pair and the input words returns a set of 
