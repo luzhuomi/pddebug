@@ -200,7 +200,7 @@ simplification
 > simp :: Re -> Re
 > simp (Pair l1 (Eps l2) r) 
 >   | isPhi r   = Phi
->   | otherwise = shift (collapse l1 l2) r
+>   | otherwise = r -- shift (collapse l1 l2) r -- this will destroy the original structure labels
 > simp (Pair l r1 r2)
 >   | isPhi r1 || isPhi r2 = Phi
 >   | otherwise            = Pair l (simp r1) (simp r2)
