@@ -953,7 +953,9 @@ check whether the two labels are siblings under the choice sub-exp in r
 > urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of the labels DO NOT appear in r, because r is just a partial derivatives!
 >   let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
 >       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
->   in [ (ur', run_ e (psi'' `apply` r''), psi'') | (ur', r', psi') <- t, let (r'',psi'') = simpl r' psi' ]
+>   in [ (ur', r''', psi'') | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
+>                             let r'' = run_ e (psi' `apply` r'), 
+>                             let (r''',psi'') = simpl  r'' psi' ]
 
 
 > simpl :: Re -> REnv -> (Re, REnv)
@@ -964,7 +966,7 @@ check whether the two labels are siblings under the choice sub-exp in r
 >   | isPhi r1 || isPhi r2 = (Phi,renv)
 >   | otherwise            = let (r1', renv') = simpl r1 renv
 >                                (r2', renv'') = simpl r2 renv'                               
->                            in (Pair l r1 r2, renv'')
+>                            in (Pair l r1' r2', renv'')
 > simpl (Choice l []) renv = (Eps l, renv)
 > simpl (Choice l [r]) renv = (shift l r, renv) -- todo: check
 > simpl (Choice l rs) renv 
@@ -996,7 +998,7 @@ reloc : relocate rop under l' to l in a renv
 > relocSingle :: Int -> Int -> REnv -> REnv
 > relocSingle l' l renv = 
 >   case IM.lookup l' renv of
->    { Just rops' -> case IM.lookup l renv of 
+>    { Just rops' -> IM.delete l' $ case IM.lookup l renv of 
 >                    { Nothing -> IM.insert l rops' renv
 >                    ; Just rops -> IM.update (\_ -> Just (rops++rops')) l renv
 >                    }
