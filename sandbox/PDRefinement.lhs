@@ -953,9 +953,11 @@ check whether the two labels are siblings under the choice sub-exp in r
 > urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of the labels DO NOT appear in r, because r is just a partial derivatives!
 >   let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
 >       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
->   in [ (ur', run_ e (psi' `apply` r'), psi') | (ur', r', psi') <- t ]
+>   in [ (ur', run_ e (psi' `apply` r'), psi') | (ur', r', psi') <- t, let (r'',psi'') = simpl r' psi' ]
 
 
+> simpl :: Re -> REnv -> (Re, REnv)
+> simpl = undefined
 
 
 finding the maximal among two RLevels
