@@ -953,11 +953,56 @@ check whether the two labels are siblings under the choice sub-exp in r
 > urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of the labels DO NOT appear in r, because r is just a partial derivatives!
 >   let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
 >       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
->   in [ (ur', run_ e (psi' `apply` r'), psi') | (ur', r', psi') <- t, let (r'',psi'') = simpl r' psi' ]
+>   in [ (ur', run_ e (psi'' `apply` r''), psi'') | (ur', r', psi') <- t, let (r'',psi'') = simpl r' psi' ]
 
 
 > simpl :: Re -> REnv -> (Re, REnv)
-> simpl = undefined
+> simpl (Pair l1 (Eps l2) r) renv 
+>   | isPhi r  = (Phi,renv)
+>   | otherwise = (r,renv) -- todo:check
+> simpl (Pair l r1 r2) renv 
+>   | isPhi r1 || isPhi r2 = (Phi,renv)
+>   | otherwise            = let (r1', renv') = simpl r1 renv
+>                                (r2', renv'') = simpl r2 renv'                               
+>                            in (Pair l r1 r2, renv'')
+> simpl (Choice l []) renv = (Eps l, renv)
+> simpl (Choice l [r]) renv = (shift l r, renv) -- todo: check
+> simpl (Choice l rs) renv 
+>   | any isChoice rs = 
+>      let (rs',e') = foldl (\(rs,e) -> \r -> case r of
+>                     { Choice l' rs2 -> ((rs ++ (map (shift l') rs2)), reloc l' l e)
+>                     ; _            -> (rs ++ [r], e) }) ([],renv) rs 
+>      in (Choice l rs', e')
+>  | otherwise = 
+>      let (rs',e'') = foldl (\(rs,e) -> \r-> 
+>                        let (r',e') = simpl r e                 
+>                        in if isPhi r'
+>                           then (rs,e)
+>                           else (rs++[r],e')                                   
+>                      ) ([],renv) rs -- todo: check for duplicate
+>      in (Choice l rs', e'')
+> simpl (Star l1 (Eps l2)) renv = (Eps (collapse l1 l2), renv) --todo:
+> simpl (Star l1 (Star l2 r)) renv = (Star (combine l1 l2) r, renv)
+> simpl (Star l r) renv
+>  | isPhi r   = (Eps l, renv)
+>  | otherwise = let (r',e) = simpl r renv in (Star l r',e)
+> simpl x e = (x,e)
+
+reloc : relocate rop under l' to l in a renv
+
+> reloc :: [Int] -> [Int] -> REnv -> REnv
+> reloc ls' [] renv = renv -- error?
+> reloc ls' (l:_) renv = foldl (\e l' -> relocSingle l' l e) renv ls'
+> relocSingle :: Int -> Int -> REnv -> REnv
+> relocSingle l' l renv = 
+>   case IM.lookup l' renv of
+>    { Just rops' -> case IM.lookup l renv of 
+>                    { Nothing -> IM.insert l rops' renv
+>                    ; Just rops -> IM.update (\_ -> Just (rops++rops')) l renv
+>                    }
+>    ; Nothing    -> renv
+>    }
+
 
 
 finding the maximal among two RLevels
