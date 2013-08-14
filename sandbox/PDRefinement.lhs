@@ -603,13 +603,13 @@ r5 = .*<s>([0-9]+)</s>.*
 g5 = [(1::Int, [0-9]+)]
 
 
-> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) ([47,60,62] ++ [100,104])) -- [97..122]))
+> -- anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) ([47,60,62] ++ [100,104])) 
 
-> -- anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128])
+> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128]) -- this will take super long time
 
 > anyNum x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [48]) 
 
-> w = "<h><d>0</d></h>"
+> w = "<h><d>0000</d></h>"
 > r5 = Pair [1] p1 (Pair [2] p2 (Pair [3] p3 (Pair [4] p4 p5)))
 >   where p1 = Star [20] (anySym 30) 
 >         p2 = Pair [41] (Ch [42] '<') (Pair [43] (Ch [44] 's') (Ch [45] '>'))
