@@ -955,7 +955,23 @@ check whether the two labels are siblings under the choice sub-exp in r
 >       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
 >   in [ (ur', r''', psi'') | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
 >                             let r'' = run_ e (psi' `apply` r'), 
->                             let (r''',psi'') = simpl  r'' psi' ]
+>                             -- let (r''',psi'') = simpl  r'' psi' ]
+>                             let (r''',psi'') = (r'',psi')] -- todo: bug here.
+
+
+
+
+*Main> showL (map id $ sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g1,r1, IM.empty)] "CC") )
+(Star [1] (Choice [2] [Ch [3] 'A',Ch [4,7] 'B',Ch [4,6] 'C']),fromList [(2,[RATr (Ch [6] 'C') Strong]),(4,[RNoCh Strong])])
+
+(Star [1] (Choice [2] [Ch [3] 'A',Ch [4,7,10] 'B',Ch [4,7,9] 'C',Ch [4,6,11] 'C',Ch [4,6,9] 'C']),fromList [(2,[RATr (Ch [6] 'C') Strong])])
+
+
+vs
+
+(Star [1] (Choice [2] [Ch [3] 'A',Choice [4] [Ch [7] 'B',Ch [6] 'C']]),fromList [(4,[RATr (Ch [6] 'C') Strong]),(6,[RNoCh Strong])])
+
+(Star [1] (Choice [2] [Ch [3] 'A',Choice [4] [Choice [7] [Ch [10] 'B',Ch [9] 'C'],Ch [6] 'C']]),fromList [(4,[RATr (Ch [6] 'C') Strong]),(7,[RATr (Ch [9] 'C') Strong])])
 
 
 > simpl :: Re -> REnv -> (Re, REnv)
@@ -1337,6 +1353,11 @@ applying REnv to a Re
 >       ; Nothing -> IM.insert i [RATr r lvl] renv
 >       }
 
+
+
+> showL :: Show a => [a] -> IO ()
+> showL xs = do 
+>   { mapM_ (\x -> print x >> putStrLn "" ) xs }  
 
 
 
