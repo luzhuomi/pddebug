@@ -86,7 +86,7 @@ The Refinement checking judgement
 > import Control.Monad
  
 
-> logger io = () -- unsafePerformIO io
+> logger mesg =  unsafePerformIO $ print mesg
 
  * The problem
 
@@ -400,10 +400,7 @@ partial derivative
 
 > getLabels :: Re -> [Int]
 > getLabels (Eps x)      = x
-> getLabels (Choice x rs) = let io = logger $ do { print "=========================="
->                                                ; print ((show rs) ++ "\n\n")
->                                                ; print "==========================" }
->                           in io `seq`  x ++ concatMap getLabels rs
+> getLabels (Choice x rs) =  x ++ concatMap getLabels rs
 > getLabels (Pair x r1 r2) = x ++ (getLabels r1) ++ (getLabels r2)
 > getLabels (Star x r)   = x ++ (getLabels r)
 > getLabels (Ch x _)     = x
@@ -840,11 +837,11 @@ the main routine
 >                     , any (\i -> case lookupUR i ureq of
 >                                  { Nothing -> False
 >                                  ; Just t  -> posEmpty t }) (getLabel r) ]
-> ref urs (l:w) = let io = logger (print (l:w)) 
+> ref urs (l:w) = let 
 >                     urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
 >                                     in  prune3 r $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
->                 in io `seq` ref urs' w
+>                 in ref urs' w
 
 
 
@@ -854,7 +851,9 @@ the main routine
 > ref' urs (l:w) = let 
 >                      urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
->                                     in  prune3 r $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
+>                                     in  prune3 r $ prune4 $ map (\(ur', r', renv') -> 
+>                                                    let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineEnv renv renv')  )
+>                                                    in  (ur', r',  combineEnv renv renv')) urs'') urs
 >                  in ref' urs' w
 
 pruning by checking for entailment among REnvs, looking for local optimal
@@ -936,6 +935,17 @@ Rationale: applying the above two operations lead to the semantically equivalent
 >            | choiceAlts r lx ly = (x == y) && (isoPairs r xs ys)
 >            | otherwise = False
 
+
+> prune4 :: [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
+> prune4 [] = []
+> prune4 ((x@(_,_,renv)):xs) | hasDupROps renv = prune4 xs
+>                            | otherwise = x:(prune4 xs)
+
+> hasDupROps :: REnv -> Bool 
+> hasDupROps renv = let ps = IM.toList renv 
+>                   in any (\(k,rops) -> 
+>                       let rops' = filter (not . isRNoCh) rops in length (nub rops') /= length rops') ps
+
 check whether the two labels are siblings under the choice sub-exp in r
 
 > choiceAlts :: Re -> Int -> Int -> Bool 
@@ -954,11 +964,35 @@ check whether the two labels are siblings under the choice sub-exp in r
 >   let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
 >       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
 >   in [ (ur', r''', psi'') | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
->                             let r'' = run_ e (psi' `apply` r'), 
->                             -- let (r''',psi'') = simpl  r'' psi' ]
->                             let (r''',psi'') = (r'',psi')] -- todo: bug here.
+>                             let r'' = run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
+>                             let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
+>                             let (r''',psi'') = {- io `seq` -} simpl  r'' psi' ,
+>                             not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
 
 
+> isRedundant :: REnv -> Re -> REnv -> Re -> Bool 
+> isRedundant renv1 r1 renv2 r2 = 
+>   let diff = diffREnv renv2 renv1
+>   in -- (not (all isRNoCh diff)) && (r1 `equiv` r2) 
+>      -- checking for (r1 `equiv` r2) is expensive
+>      (any (\(k, rops) -> any (not . isRNoCh) rops) (IM.toList diff)) && bogusDiff diff r1
+>    where bogusDiff diff (Choice (l:_) rs) = 
+>            case IM.lookup l diff of              
+>             { Just rops -> any (\(RATr r _) -> r `elem` rs) rops
+>             ; Nothing -> False }  
+>          bogusDiff diff (Pair _ r1 r2) = bogusDiff diff r1 || bogusDiff diff r2
+>          bogusDiff diff (Star _ r) = bogusDiff diff r
+>          bogusDiff diff (Ch _ _) = False
+>          bogusDiff diff (Eps _) = False
+>          bogusDiff diff Phi = False
+
+> diffREnv :: REnv -> REnv -> REnv -- rops in r2 but not in r1
+> diffREnv r2 r1 = 
+>  let ps = IM.toList r2  
+>      ps' = foldl (\acc (k,rops) -> case IM.lookup k r1 of
+>       { Nothing -> acc ++ [(k,rops)]
+>       ; Just rops' -> acc ++ [(k,filter (\rop -> not (rop `elem` rops')) rops)] } ) [] ps
+>  in IM.fromList ps'
 
 
 *Main> showL (map id $ sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g1,r1, IM.empty)] "CC") )
@@ -988,14 +1022,14 @@ vs
 > simpl (Choice l rs) renv 
 >   | any isChoice rs = 
 >      let (rs',e') = foldl (\(rs,e) -> \r -> case r of
->                     { Choice l' rs2 -> ((rs ++ (map (shift l') rs2)), reloc l' l e)
->                     ; _            -> (rs ++ [r], e) }) ([],renv) rs 
+>                     { Choice l' rs2 -> ((rs ++ (map {- (shift l')-} id  rs2)), reloc l' l e)
+>                     ; _             -> (rs ++ [r], e) }) ([],renv) rs 
 >      in (Choice l rs', e')
 >  | otherwise = 
 >      let (rs',e'') = foldl (\(rs,e) -> \r-> 
 >                        let (r',e') = simpl r e                 
 >                        in if isPhi r'
->                           then (rs,e)
+>                           then (rs,e')
 >                           else (rs++[r],e')                                   
 >                      ) ([],renv) rs -- todo: check for duplicate
 >      in (Choice l rs', e'')
@@ -1010,10 +1044,11 @@ reloc : relocate rop under l' to l in a renv
 
 > reloc :: [Int] -> [Int] -> REnv -> REnv
 > reloc ls' [] renv = renv -- error?
-> reloc ls' (l:_) renv = foldl (\e l' -> relocSingle l' l e) renv ls'
+> reloc ls' ls@(l:_) renv = let io = logger ("relocating " ++ show ls' ++ " to " ++ show ls)
+>   in {- io `seq` -} foldl (\e l' -> relocSingle l' l e) renv ls'
 > relocSingle :: Int -> Int -> REnv -> REnv
-> relocSingle l' l renv = 
->   case IM.lookup l' renv of
+> relocSingle l' l renv  =
+>    case IM.lookup l' renv of
 >    { Just rops' -> IM.delete l' $ case IM.lookup l renv of 
 >                    { Nothing -> IM.insert l rops' renv
 >                    ; Just rops -> IM.update (\_ -> Just (rops++rops')) l renv
@@ -1342,7 +1377,7 @@ applying REnv to a Re
 
 
 > combineEnv :: REnv -> REnv -> REnv 
-> combineEnv renv1 renv2 = IM.unionWith (\x y -> nub (x ++ y)) renv1 renv2 
+> combineEnv renv1 renv2 = IM.unionWith (\x y -> (x ++ y)) renv1 renv2 -- don't nub here.
 
 > extend :: REnv -> [Int] -> ROp -> REnv
 > extend renv [] _ = renv
