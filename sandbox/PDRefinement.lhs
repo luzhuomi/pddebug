@@ -183,7 +183,6 @@ containment check
 > equiv r1 r2 = r1 `contain` r2 && r2 `contain` r1
 
 
-simplification 
 
 > collapse x y = nub (sort (x ++ y))
 > combine x y = nub (sort (x ++ y))
@@ -197,23 +196,69 @@ simplification
 > shift ls (Eps ls') = Eps (combine ls' ls)
 
 
+
+simplification 
+
+
+> simpl :: Re -> REnv -> (Re, REnv)
+> simpl (Pair l1 (Eps l2) r) renv 
+>   | isPhi r  = (Phi,renv)
+>   | otherwise = (r,renv) -- todo:check
+> simpl (Pair l r1 r2) renv 
+>   | isPhi r1 || isPhi r2 = (Phi,renv)
+>   | otherwise            = let (r1', renv') = simpl r1 renv
+>                                (r2', renv'') = simpl r2 renv'                               
+>                            in (Pair l r1' r2', renv'')
+> simpl (Choice l []) renv = (Eps l, renv)
+> simpl (Choice l [r]) renv = (shift l r, renv) -- todo: check
+> simpl (Choice l rs) renv 
+>   | any isChoice rs = 
+>      let (rs',e') = foldl (\(rs,e) -> \r -> case r of
+>                     { Choice l' rs2 -> ((rs ++ (map {- (shift l')-} id  rs2)), reloc l' l e)
+>                     ; _             -> (rs ++ [r], e) }) ([],renv) rs 
+>      in (Choice l rs', e')
+>  | otherwise = 
+>      let (rs',e'') = foldl (\(rs,e) -> \r-> 
+>                        let (r',e') = simpl r e                 
+>                        in if isPhi r'
+>                           then (rs,e')
+>                           else (rs++[r],e')                                   
+>                      ) ([],renv) rs -- todo: check for duplicate
+>      in (Choice l rs', e'')
+> simpl (Star l1 (Eps l2)) renv = (Eps (collapse l1 l2), renv) --todo:
+> simpl (Star l1 (Star l2 r)) renv = (Star (combine l1 l2) r, renv)
+> simpl (Star l r) renv
+>  | isPhi r   = (Eps l, renv)
+>  | otherwise = let (r',e) = simpl r renv in (Star l r',e)
+> simpl x e = (x,e)
+
+reloc : relocate rop under l' to l in a renv
+
+> reloc :: [Int] -> [Int] -> REnv -> REnv
+> reloc ls' [] renv = renv -- error?
+> reloc ls' ls@(l:_) renv = let io = logger ("relocating " ++ show ls' ++ " to " ++ show ls)
+>   in {- io `seq` -} foldl (\e l' -> relocSingle l' l e) renv ls'
+> relocSingle :: Int -> Int -> REnv -> REnv
+> relocSingle l' l renv  =
+>    case IM.lookup l' renv of
+>    { Just rops' -> IM.delete l' $ case IM.lookup l renv of 
+>                    { Nothing -> IM.insert l rops' renv
+>                    ; Just rops -> IM.update (\_ -> Just (rops++rops')) l renv
+>                    }
+>    ; Nothing    -> renv
+>    }
+
+simplication w/o changing the REnv
+
 > simp :: Re -> Re
 > simp (Pair l1 (Eps l2) r) 
 >   | isPhi r   = Phi
->   | otherwise = r -- shift (collapse l1 l2) r -- this will destroy the original structure labels
+>   | otherwise = shift (collapse l1 l2) r
 > simp (Pair l r1 r2)
 >   | isPhi r1 || isPhi r2 = Phi
 >   | otherwise            = Pair l (simp r1) (simp r2)
 > simp (Choice l []) = Eps l
 > simp (Choice l [r]) = shift l r
-> {- simp (Choice l rs)  -- this will destroy the structure
->  | any isChoice rs =  
->     Choice l $ 
->        foldl (\rs-> \r-> case r of
->                Choice l rs2 -> rs ++ (map (shift l) rs2)
->                _            -> rs ++ [r])
->              [] rs 
->  | otherwise = Choice l $ nub $ filter (not.isPhi) $ map simp rs -}
 > simp (Choice l rs) = Choice l $ nub $ filter (not.isPhi) $ map simp rs
 > simp (Star l1 (Eps l2)) = Eps $ collapse l1 l2 
 > simp (Star l1 (Star l2 r)) = Star (combine l1 l2) r 
@@ -221,6 +266,8 @@ simplification
 >  | isPhi r   = Eps l
 >  | otherwise = Star l $ simp r 
 > simp x = x 
+
+
 
 
 
@@ -461,11 +508,15 @@ The second property ensures that if $w$ is not in $r$, the replacement shall hav
   \gamma, r^i \vdash d : r'^i
 
 > replacement ureq r w r' = 
->    let ls = getLabels r  
->        ls'  = getLabels r'          
+>    let ls = getLabel r  
+>        ls'  = getLabel r'          
 >    in ls == ls' && 
->      ( undefined
->      )
+>       replacement' ureq r w r' &&
+>         ( case ls of 
+>          { [] -> True
+>          ; (l:_) -> case lookup l ureq of 
+>              { Just r  -> w `match` [r]
+>              ; Nothing -> True } } )
 
 
    i \not \in dom(\gamma)
@@ -478,10 +529,16 @@ The second property ensures that if $w$ is not in $r$, the replacement shall hav
  ------------------------- (rEmp)
  \gamma, () \vdash d : r
 
+
+> replacement' ureq (Eps ls) w r' = w `match` [r']
+
+
    d \in r 
  ------------------------- (rLab)
  \gamma, l \vdash d : r
 
+
+> replacement' ureq (Ch ls c) w r' = w `match` [r']
 
 
   fv(r1) = \bar{i1} fv(r2 = \bar{i2} 
@@ -490,12 +547,25 @@ The second property ensures that if $w$ is not in $r$, the replacement shall hav
  ------------------------------------- (rSeq)
  \gamma, r1r2 \vdash d1d2 : r1'r2'
 
+> replacement' ureq (Pair ls r1 r2) w (Pair ls' r1' r2') = 
+>    let ls1 = getLabels r1   
+>        ls2 = getLabels r2         
+>        ureq1 = limit ureq ls1 
+>        ureq2 = limit ureq ls2
+>        ws    = split2 w
+>    in any (\(w1,w2) -> replacement ureq1 r1 w1 r1' && replacement ureq2 r2 w2 r2' ) ws
+
+
+
+
+                                     
+
  we use \gamma_{\bar{i}} to denote { (i,\gamma(i)) | i \in \bar{i} and i \in dom(\gamma) }
                           
                           
   \gamma, r1 \vdash d : r1'
  -------------------------------------- ( rOr1)   
- \gamma, r1|r2 \vdash d : r1'|r2                          
+ \gamma, r1|r2 \vdash d : r1'|r2     
 
 
   \gamma, r2 \vdash d : r2'
@@ -503,9 +573,21 @@ The second property ensures that if $w$ is not in $r$, the replacement shall hav
  \gamma, r1|r2 \vdash d : r1|r2'                          
 
 
+> replacement' ureq (Choice ls rs) w (Choice ls' rs') = replChoiceSub rs rs'
+>    where replChoiceSub [] rs = w `match` rs
+>          replChoiceSub _ [] = False
+>          replChoiceSub (r:rs) (r':rs') = replacement ureq r w r' || replChoiceSub rs rs'
+
+
+
   \gamma, r \vdash di : r'  \forall i \in {1,n}
  ------------------------------------------------- ( rStar)   
  \gamma, r* \vdash d1...dn : r'*                          
+
+> replacement' ureq (Star ls r) w (Star ls' r') =
+>   let wss = split w
+>   in any (\ws -> all (\w' -> replacement ureq r w' r') ws) wss
+
 
 
 Rules rSeq, rOr1, rOr2 and rStar validate the replacement relation indeterministically
@@ -517,7 +599,22 @@ Rules rSeq, rOr1, rOr2 and rStar validate the replacement relation indeterminist
   \gamma p \vdash D : p'
 
 
+> split2 :: String -> [(String,String)]
+> split2 [] = [ ([],[]) ]
+> split2 (w@(c:ws)) = 
+>        nub $ (w,[]) : ([],w) : 
+>              (map (\(w1,w2) -> (c:w1,w2)) $ split2 ws)
 
+> split :: String -> [[String]]
+> split [] = [ [] ]
+> split [c] = [ [[c]] ]
+> split (w@(c:ws)) = 
+>  [w]:[ take i w : xs | i <- [1..length ws], xs <- split (drop i w) ]
+
+
+> match :: [Char] -> [Re] -> Bool
+> match cs rs = let finals = foldl (\ts c -> concatMap (\t -> pderiv t c) ts) rs cs
+>               in  any posEmpty finals
 
 
 
@@ -602,11 +699,11 @@ g5 = [(1::Int, [0-9]+)]
 
 > -- anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) ([47,60,62] ++ [100,104])) 
 
-> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128]) -- this will take super long time
+> anySym x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [0..128]) 
 
-> anyNum x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [48]) 
+> anyNum x = Choice [x] (map (\i -> (Ch [(100*x+i)] (chr i))) [48..57]) 
 
-> w = "<h><d>0000</d></h>"
+> w = "<h><d>91234567</d></h>"
 > r5 = Pair [1] p1 (Pair [2] p2 (Pair [3] p3 (Pair [4] p4 p5)))
 >   where p1 = Star [20] (anySym 30) 
 >         p2 = Pair [41] (Ch [42] '<') (Pair [43] (Ch [44] 's') (Ch [45] '>'))
@@ -840,7 +937,7 @@ the main routine
 > ref urs (l:w) = let 
 >                     urs' = concatMap (\ (ur,r,renv) -> 
 >                                     let urs'' = urePDeriv (ur, r, renv) l
->                                     in  prune3 r $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
+>                                     in  prune3 r $ prune4 $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
 >                 in ref urs' w
 
 
@@ -893,7 +990,7 @@ as rops_1 = [(0, ATr D) ]  is entailed by rops_2 = [(0, ATr D), (1, ATr D)]
 
 
 prune by semantic equivalent 
-
+too expensive!
 
 > prune2 :: Re -> [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
 > prune2 r [] = []
@@ -976,7 +1073,7 @@ check whether the two labels are siblings under the choice sub-exp in r
 >   in -- (not (all isRNoCh diff)) && (r1 `equiv` r2) 
 >      -- checking for (r1 `equiv` r2) is expensive
 >      (any (\(k, rops) -> any (not . isRNoCh) rops) (IM.toList diff)) && bogusDiff diff r1
->    where bogusDiff diff (Choice (l:_) rs) = 
+>    where bogusDiff diff (Choice (l:_) rs) = -- the diff is bogus if it is applied to r1, it does not change the semantics e.g. adding 'a' to (a+b)
 >            case IM.lookup l diff of              
 >             { Just rops -> any (\(RATr r _) -> r `elem` rs) rops
 >             ; Nothing -> False }  
@@ -994,67 +1091,6 @@ check whether the two labels are siblings under the choice sub-exp in r
 >       ; Just rops' -> acc ++ [(k,filter (\rop -> not (rop `elem` rops')) rops)] } ) [] ps
 >  in IM.fromList ps'
 
-
-*Main> showL (map id $ sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g1,r1, IM.empty)] "CC") )
-(Star [1] (Choice [2] [Ch [3] 'A',Ch [4,7] 'B',Ch [4,6] 'C']),fromList [(2,[RATr (Ch [6] 'C') Strong]),(4,[RNoCh Strong])])
-
-(Star [1] (Choice [2] [Ch [3] 'A',Ch [4,7,10] 'B',Ch [4,7,9] 'C',Ch [4,6,11] 'C',Ch [4,6,9] 'C']),fromList [(2,[RATr (Ch [6] 'C') Strong])])
-
-
-vs
-
-(Star [1] (Choice [2] [Ch [3] 'A',Choice [4] [Ch [7] 'B',Ch [6] 'C']]),fromList [(4,[RATr (Ch [6] 'C') Strong]),(6,[RNoCh Strong])])
-
-(Star [1] (Choice [2] [Ch [3] 'A',Choice [4] [Choice [7] [Ch [10] 'B',Ch [9] 'C'],Ch [6] 'C']]),fromList [(4,[RATr (Ch [6] 'C') Strong]),(7,[RATr (Ch [9] 'C') Strong])])
-
-
-> simpl :: Re -> REnv -> (Re, REnv)
-> simpl (Pair l1 (Eps l2) r) renv 
->   | isPhi r  = (Phi,renv)
->   | otherwise = (r,renv) -- todo:check
-> simpl (Pair l r1 r2) renv 
->   | isPhi r1 || isPhi r2 = (Phi,renv)
->   | otherwise            = let (r1', renv') = simpl r1 renv
->                                (r2', renv'') = simpl r2 renv'                               
->                            in (Pair l r1' r2', renv'')
-> simpl (Choice l []) renv = (Eps l, renv)
-> simpl (Choice l [r]) renv = (shift l r, renv) -- todo: check
-> simpl (Choice l rs) renv 
->   | any isChoice rs = 
->      let (rs',e') = foldl (\(rs,e) -> \r -> case r of
->                     { Choice l' rs2 -> ((rs ++ (map {- (shift l')-} id  rs2)), reloc l' l e)
->                     ; _             -> (rs ++ [r], e) }) ([],renv) rs 
->      in (Choice l rs', e')
->  | otherwise = 
->      let (rs',e'') = foldl (\(rs,e) -> \r-> 
->                        let (r',e') = simpl r e                 
->                        in if isPhi r'
->                           then (rs,e')
->                           else (rs++[r],e')                                   
->                      ) ([],renv) rs -- todo: check for duplicate
->      in (Choice l rs', e'')
-> simpl (Star l1 (Eps l2)) renv = (Eps (collapse l1 l2), renv) --todo:
-> simpl (Star l1 (Star l2 r)) renv = (Star (combine l1 l2) r, renv)
-> simpl (Star l r) renv
->  | isPhi r   = (Eps l, renv)
->  | otherwise = let (r',e) = simpl r renv in (Star l r',e)
-> simpl x e = (x,e)
-
-reloc : relocate rop under l' to l in a renv
-
-> reloc :: [Int] -> [Int] -> REnv -> REnv
-> reloc ls' [] renv = renv -- error?
-> reloc ls' ls@(l:_) renv = let io = logger ("relocating " ++ show ls' ++ " to " ++ show ls)
->   in {- io `seq` -} foldl (\e l' -> relocSingle l' l e) renv ls'
-> relocSingle :: Int -> Int -> REnv -> REnv
-> relocSingle l' l renv  =
->    case IM.lookup l' renv of
->    { Just rops' -> IM.delete l' $ case IM.lookup l renv of 
->                    { Nothing -> IM.insert l rops' renv
->                    ; Just rops -> IM.update (\_ -> Just (rops++rops')) l renv
->                    }
->    ; Nothing    -> renv
->    }
 
 
 
@@ -1203,107 +1239,6 @@ finding the maximal among two RLevels
 
 
 
-> {- replaced by the above forumation, combining urPDeriv and urPDerivS by parameterizing S
-> urPDeriv :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
-> urPDeriv (ur, Eps (i:is)) l next_i
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RASt (Ch [next_i] l) Strong]) 
->                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, Eps [next_i], IM.singleton i [RASt (Ch [next_i] l) Weak]) ]
-> urPDeriv (ur, (Ch (i:is) l)) l' next_i = 
->   case lookup i ur of 
->     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
->                            | r' <- pderiv r l ]
->              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RATr (Ch [next_i] l') Strong]) | r' <- pderiv r l]
->     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
->               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RATr (Ch [next_i] l') Weak] ) ] 
->     }
-> urPDeriv (ur, Pair (i:is) r1 r2) l next_i =
->    case lookup i ur of 
->     { Just p -> 
->         case pderiv p l of
->           { [] -> [] 
->           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i ] ++ (urPDerivS (ur `limit` (fv r2), r2) l next_i)
->                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i] 
->           }
->     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l next_i ] ++ (urPDeriv (ur `limit` (fv r2), r2) l next_i)
->               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDeriv (ur `limit` (fv r1), r1) l next_i ]
->     }
-> urPDeriv (ur, Choice (i:is) rs) l next_i = 
->    case lookup i ur of
->      { Just p ->  
->          case pderiv p l of
->          { [] -> []
->          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
->                  in concatMap (\ r -> urPDerivS (ur', r) l next_i) rs -- todo:move i:is to each r
->          }
->      ; Nothing -> concatMap (\ r -> urPDeriv (ur, r) l next_i) rs 
->      }
-> urPDeriv (ur, Star (i:is) r) l next_i = 
->     case lookup i ur of 
->       { Just p -> 
->          case pderiv p l of
->          { [] -> []
->          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
->                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur'', r', renv) <- urPDerivS (ur',r) l next_i ]
->          }
->       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur', r', renv) <- urPDeriv (ur,r) l next_i ]
->       }
-> urPDeriv ur c next_i = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
-
-
-urPDeriv with Strong recommendation
-
-> urPDerivS :: (UReq, Re) -> Char -> Int -> [(UReq, Re, REnv)]
-> urPDerivS (ur, Eps (i:is)) l next_i
->   | i `inUR` ur = [ ((updateUR i r' ur), Eps [next_i], IM.singleton i [RASt (Ch [ next_i] l) Strong]) 
->                      | let r = fromJust (lookupUR i ur), r' <- pderiv r l ]
->   | otherwise   = [ (ur, (Eps [next_i]), IM.singleton i [RASt (Ch [ next_i] l) Strong]) ]
-> urPDerivS (ur, (Ch (i:is) l)) l'  next_i = 
->   case lookup i ur of 
->     { Just r | l == l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.empty )
->                            | r' <- pderiv r l ]
->              | l /= l' -> [ ((updateUR i r' ur), (Eps (i:is)), IM.singleton i [RATr (Ch [ next_i] l') Strong]) | r' <- pderiv r l]
->     ; Nothing | l == l' -> [ (ur, Eps (i:is), IM.empty ) ]
->               | l /= l' -> [ (ur, Eps (i:is), IM.singleton i [RATr (Ch [ next_i] l') Strong] ) ] 
->     }
-> urPDerivS (ur, Pair (i:is) r1 r2) l  next_i =
->    case lookup i ur of 
->     { Just p -> 
->         case pderiv p l of
->           { [] -> [] 
->           ; ps  | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i ] ++ (urPDerivS (ur `limit` (fv r2), r2) l next_i)
->                 | otherwise   -> [ ((ur' ++ ur `limit` (fv r2) ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i ] 
->           }
->     ; Nothing | posEmpty r1 -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i] ++ (urPDerivS (ur `limit` (fv r2), r2) l next_i)
->               | otherwise   -> [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- urPDerivS (ur `limit` (fv r1), r1) l next_i]
->     }
-> urPDerivS (ur, Choice (i:is) rs) l next_i = 
->    case lookup i ur of
->      { Just p ->  
->          case pderiv p l of
->          { [] -> []
->          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
->                  in concatMap (\ r -> urPDerivS (ur', r) l next_i) rs -- todo:move i:is to each r
->          }
->      ; Nothing -> concatMap (\ r -> urPDerivS (ur, r) l next_i) rs 
->      }
-> urPDerivS (ur, Star (i:is) r) l next_i = 
->     case lookup i ur of 
->       { Just p -> 
->          case pderiv p l of
->          { [] -> []
->          ; ps -> let ur' = updateUR i (Choice dontcare ps) ur
->                  in [ (ur'', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur'', r', renv) <- urPDerivS (ur',r) l next_i]
->          }
->       ; Nothing -> [ (ur', Pair (i:is) r' (Star (i:is) r), renv)  
->                        | (ur', r', renv) <- urPDerivS (ur,r) l next_i]
->       }
-> urPDerivS ur c next_i = error $ "unhandled input: " ++ (show ur)  ++ "/" ++ (show c)
-> -}
-
 
 return all labels annotation of a re
 
@@ -1331,13 +1266,16 @@ applying REnv to a Re
 
 
 > apply_ :: REnv -> Re -> Re 
-> apply_ renv r = let is = concatMap getLabels $ resInROps (concatMap snd (IM.toList renv)) -- fixme fromJust
+> apply_ renv r = let is = concatMap getLabels $ resInROps (concatMap snd (IM.toList renv)) 
 >                     max_i = maximum $ (getLabels r) ++ is
 >                 in run_ (Env max_i) (apply renv r)
 
 > apply :: REnv -> Re -> State Env Re 
-> apply renv s = 
->   let r = simp  s
+> apply renv' s = 
+>   let (r,renv) = simpl s renv' -- todo: this changes the renv' but it seems faster, not sure about correctness 
+>           -- more thoughts, maybe we shall split the simp into choice simplification and others non-choice simplification, because choice simplification is the only one that change the REnv.        
+>       -- r = simp s
+>       -- renv = renv'
 >   in case getLabel r of 
 >                {  (i:is) -> -- The first one is always the orginal label annotated to the regexp. The tail could contain those being collapsed because of pderiv op
 >                  case IM.lookup i renv of 
@@ -1397,248 +1335,3 @@ applying REnv to a Re
 
 
 
-OLD STUFF: the norm and denorm are hard to explain
-
-
-> {-
-
-> refine :: [URPair] -> Doc -> [Re] 
-
-
-```
- -------------------------------------------------------------------------------------------------- (Eps)
-  { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \models \epsilon : 
-         { (\gamma_i, r_i) | (\gamma_i,r_i) \in { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \wedge   
-                              \epsilon \in \gamma_i (x) \forall x in \gamma_i \wedge 
-                              \epsilon \in r_i }  ++ 
-                              (\gamma_i,r_i?) \in { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \wedge   
-                              \epsilon \in \gamma_i (x) \forall x in \gamma_i \wedge 
-                              \epsilon \not \in r_i }  
-
-```
-
-> refine urs [] = 
->   let urs' = filter (\ (URPair u r rec) -> allAccEps u ) urs 
->       (urs_rAccEps, urs_rNAccEps) = partition (\ (URPair u r rec) -> posEmpty r) urs'
->       rNAccEpsEps = map (\(URPair u r rec) -> let x = topLabel r in (Choice x [r, Eps x])) urs_rNAccEps
->       rAccEps = map (\ (URPair _ r _) -> r) urs_rAccEps
->   in rAccEps ++ rNAccEpsEps
-
-```
-   { (\gamma_1, r_1), ..., (\gamma_n, r_n) } / l =     { (\gamma_1', r_1'), ..., (\gamma_m', r_m') }
-   
-    { (\gamma_1', r_1'), ..., (\gamma_m', r_m') } \models v : { q_1', ... q_k' }
-   
-   { r_1, ..., r_n } ~>_norm  { (l_1, \bar{r}_1), ... (l,  \bar{r} ), ...,  (l_j, \bar{r}_j) } -- TODO: check why no need to takes in the user req? ANS: yes. no need, other monomials is not activated by the input lv.
-  
-    { (l_1, \bar{r}_1), ... (l,  \bar{q'} ), ...,  (l_j, \bar{r}_j) } ~>_denorm {q_1, ..., q_h }
- -------------------------------------------------------------------------------------------------- (Norm)
-  { (\gamma_1, r_1), ..., (\gamma_n, r_n) } \models (lv) : {q_1, ..., q_h }
-```
-
-> refine urs (l:w) = 
->   let urs' = urPDeriv urs l 
->       qs'  = refine urs' w        
->       ms   = foldl (\m1 m2 -> m1 `unionLNF` m2) emptyLNF (map (\ (URPair _ r _) -> norm r) urs)  -- all the nfa states should be grouped into the same normal form, e.g. [ a, (a|b) ] ~> [a, b]
->       ms'  = combine ms l qs'
->       qs   = denorm ms'
->   in qs
->   where combine :: LNF -> Char -> [Re] -> LNF
->         combine = undefined
-
-extracts the topmost level label
-
-> -}
-
-> {-
-
-> topLabel :: Re -> [Int]
-> topLabel (Eps x) = x
-> topLabel (Ch x _) = x
-> topLabel (Choice x _) = x
-> topLabel (Pair x _ _) = x
-> topLabel (Star x _) = x
-> topLabel Phi = dontcare
-
-
-normalization
-  $p \norm m1 | ... | mn$  
-                 
-     where m_i denotes the monomial of shape (l_i, [r1,...,rn])
-
-de-normalization
-  $ m1 | ... | mn \denorm p$ 
-
-
-1) l, \epsilon_i r -> li r
-2) { r1 r, r2 r } => (r1|r2) r
-3)  r_i (r'_i)*_j and r_i \subseteq r_i' ->    r_i*_j    () \in lnf 
-                       ^^^^^^^^^^^^^^^^^^      r_i+_j    otherwise    -- this or directly update the l_i to (l|l')_i? for all location of i in r?
-4) (r*|\epsilon) r' -> r* r'                 
-    
-
-The linear normal form
-
-
-lnf ::= { (l1,\bar{r1}), ... , (ln, \bar{rn}) } U {\eps}  ||
-        { (l1,\bar{r1}), ... , (ln, \bar{rn}) } 
-
-> data LNF = WithEps [Int] ( M.Map Char [Re] -- Maping l -> [r]
->                          , M.Map Re [Re] ) -- Mapping r* -> prefix 
->          | WithoutEps [Int] ( M.Map Char [Re] -- Mapping l -> [r]
->                             , M.Map Re [Re] ) -- Mapping r* -> prefix
->           deriving Show
-
-what is in addition is the dictionary that maps the trailing r* back to the prefix for all the monomials. It will be used to 
-denormalization
-
-
-> emptyLNF = WithoutEps [] (M.empty, M.empty)
-
-> unionLNF :: LNF -> LNF -> LNF 
-> unionLNF = undefined
-
-
-
-norm r = if () \in r then (norm' r) ++ { () }  else (norm' r)
-
-> norm :: Re -> LNF                            
-> norm Phi = error "applying norm to Phi"
-> norm r | posEmpty r = WithEps x (norm' x r)
->        | otherwise  = WithoutEps x (norm' x r)
->   where x = getLabel r
-              
-
-norm' r = groupBy (eq . last) [(l, r') | l \in \sigma(r), r' \in pderiv r l]
-
-> norm' :: [Int] -> Re -> (M.Map Char [Re], M.Map Re [Re])
-> norm' x r = let ms = [ (l, r') | l <- sigma r, r' <- pderiv r l ]
->             in (foldl (\m (l,r) -> upsert l [r] (++) m) M.empty ms, foldl (\m (r,l) -> upsert r [l] (++) m) M.empty (map (\(l,r) -> (last_ r, Pair x (Ch x l) (init_ r))) ms))
-
-last_ returns the right most re in a sequence of Re
-
-> last_ :: Re -> Re 
-> last_ (Pair x r1 r2) = last_ r2
-> last_ r = r
-
-> init_ :: Re -> Re
-> init_ (Pair x r1 r2) = let r2' = (init_ r2)
->                        in case r2' of { Eps _ -> r1; _ -> Pair x r1 r2' }
-> init_ r = Eps dontcare
-
-append_ appends two Re(s) by sequence
-
-> append_ :: [Int] -> Re -> Re -> Re
-> append_ _ (Pair y r1 r2) r3 = Pair y r1 (append_ y r2 r3)
-> append_ x r1 r2 = Pair x r1 r2
-
-> upsert :: Ord k => k -> v -> (v -> v -> v) -> M.Map k v -> M.Map k v
-> upsert k v f m = case M.lookup k m of 
->                  { Just v' -> M.adjust (\_ -> f v' v) k m 
->                  ; Nothing -> M.insert k v m }
-
-> lookupMN :: Char -> LNF -> Maybe [Re]
-
-> lookupMN c (WithEps x (m1,m2)) = M.lookup c m1
-> lookupMN c (WithoutEps x (m1,m2)) = M.lookup c m1
-
-> updateMN :: Char -> [Re] -> LNF -> LNF
-> updateMN c rs (WithEps x (m1,m2)) = 
->    let ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
->    in WithEps x (M.adjust (\_ -> rs) c m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)  -- the subfix r' might not be in m2
-> updateMN c rs (WithoutEps x (m1,m2)) = 
->    let  ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)
->    in WithoutEps x (M.adjust (\_ -> rs) c m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)  -- the subfix r' might not be in m2
-
-> insertMN :: Char -> [Re] -> LNF -> LNF
-> insertMN c rs (WithEps x (m1,m2)) = 
->    let ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
->    in WithEps x (M.insert c rs m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps) 
-> insertMN c rs (WithoutEps x (m1,m2)) = 
->    let ps = map (\r -> (last_ r, Pair x (Ch x c) (init_ r))) rs   -- the tails and the head (prefix + label)  
->    in WithoutEps x (M.insert c rs m1, foldl (\m (t,h) -> upsert t [h] (++) m) m2 ps)
-
-> singleton :: [Int] -> Doc -> Re 
-> singleton x cs = foldr (\l r -> Pair x (Ch x l) r) (Eps x) cs
-
-
-return a choice if the list is non-singleton
-
-> mkChoice :: [Int] -> [Re] -> Re 
-> mkChoice x [r] = r
-> mkChoice x rs = Choice x rs
-
-denorm (\bar{m}|()) = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}                           
-                      in [ (mkStar plus) | plus <- pluses ] ++ nonpluses
-                          
-denorm \bar{m} = let (pluses, nonpluses) = splitBy isPlusMonomial $ denorm' \bar{m}
-                 in [ (mkPlus plus) | plus <- pluses ]  ++ nonpluses
-
-
-> denorm :: LNF -> [Re]
-> denorm (WithEps x (m1,m2)) = 
->    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
->        ps = map mkStar (M.toList plusMonoGrp)         
->        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
->    in (ps ++ nps)
-> denorm (WithoutEps x (m1,m2)) = 
->    let (plusMonoGrp, nonPlusMonoGrp) = part m2 
->        ps = map mkPlus (M.toList plusMonoGrp)         
->        nps = map (\(tl, its) -> append_ x (mkChoice x its) tl) (M.toList nonPlusMonoGrp)
->    in (ps ++ nps)
-
-
-> mkStar :: (Re, [Re]) -> Re
-> mkStar = fst
-
-> mkPlus :: (Re, [Re]) -> Re
-> mkPlus (Star x r,its) = Pair x r (Star x r)
-
-
-partition map by plus monomial and non plus monomial
-
-> part :: M.Map Re [Re] -> (M.Map Re [Re] , M.Map Re [Re])
-> part m = M.partitionWithKey (\ r rs -> isPlusMN rs r ) m
-
-
-a monomial is a plus mono iff m = (p1|...|pn, r*) and (p1|...|pn) \equiv r and r 
-
-isPlus (p1|...|pn) r* = (p1|...|pn) <= r and r <= (p1|...|pn)
-
-> isPlusMN :: [Re] -> Re -> Bool
-> isPlusMN ps (Star x r) = ((Choice dontcare ps) `subsumedBy` r) && (r `subsumedBy` (Choice dontcare ps))
-> isPlusMN ps _ = False
-
-the containment check
-
-> subsumedBy :: Re -> Re -> Bool
-> subsumedBy r1 r2 = subsumedBy' M.empty r1 r2
-
-> data Leq = Leq Re Re deriving (Eq, Ord, Show)
-
-> subsumedBy' :: M.Map Leq () -> Re -> Re -> Bool
-> subsumedBy' env Phi _ = True
-> subsumedBy' env r1 r2 = 
->   case M.lookup (Leq r1 r2) env of   
->    { Just _  -> True  
->    ; Nothing | posEmpty r1 && not (posEmpty r2) -> False
->              | otherwise -> let env' = M.insert (Leq r1 r2)  () env
->                             in  all (\l -> subsumedBy' env' (deriv r1 l) (deriv r2 l)) (sigma (Choice dontcare [r1,r2]))
->    }
-
-                          
-                          
-denorm' \bar{m} = groupBy (eq . snd) [(l, r/l) | l \in \sigma(r)]
-
-isPlusMonomial (l,p) = l \in (choiceToList p)
-
-mkStar ms = let fs = map fst ms  
-                (Star r) = snd (head ms)
-            in if (sort fs) == (sort (choiceToList r)) then (Star r) else ms
-
-mkPlus ms = let fs = map fst ms  
-                (Star r) = snd (head ms)
-            in if (sort fs) == (sort (choiceToList r)) then (r, (Star r)) else ms
-
-
-> -}
