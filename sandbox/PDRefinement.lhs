@@ -140,7 +140,18 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >     (==) Phi Phi = True
 >     (==) _ _ = False
 
+> pretty :: Re -> String
+> pretty (Choice _ rs) = "(" ++ interleave "|" (map pretty rs) ++ ")"
+> pretty (Pair _ r1 r2) = "(" ++ pretty r1 ++ "," ++ pretty r2 ++ ")"
+> pretty (Star _ r1) = pretty r1 ++ "*"
+> pretty (Ch _ c1) = [c1]
+> pretty (Eps _) = "()"
+> pretty Phi = "{}"
 
+> interleave :: String -> [String] -> String
+> interleave _ [] = ""
+> interleave _ [x] = x
+> interleave d (x:xs) = x ++ d ++ interleave d xs
 
 > posEmpty :: Re -> Bool
 > posEmpty (Eps _)        = True
@@ -760,7 +771,8 @@ sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") 
 > main = do 
 >   [si] <- getArgs
 >   let i = read si
->   print $ (refine g5 r5 w) !! i
+>   print $ pretty r5        
+>   print $ pretty $ (refine g5 r5 w) !! i
 
 
 New idea: refinement algo takes ureq re pair and the input words returns a set of 

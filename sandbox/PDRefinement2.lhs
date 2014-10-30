@@ -132,6 +132,13 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >     (==) Phi Phi = True
 >     (==) _ _ = False
 
+> pretty :: Re -> String
+> pretty (Choice _ rs) = "(" ++ interleave "|" (map pretty rs) ++ ")"
+> pretty (Pair _ r1 r2) = "(" ++ pretty r1 ++ "," ++ pretty r2 ++ ")"
+> pretty (Star _ r1) = pretty r1 ++ "*"
+> pretty (Ch _ c1) = [c1]
+> pretty (Eps _) = "()"
+> pretty Phi = "{}"
 
 
 > posEmpty :: Re -> Bool
