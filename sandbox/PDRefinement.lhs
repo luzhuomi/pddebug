@@ -33,7 +33,7 @@ $\gamma \vdash e : t$
 
 
 
-Regular expression debugging and reconstruction
+Regular expression debugging and refinement
 ===============================================
 
 The connection
@@ -52,13 +52,13 @@ The difference
 
  $$ d \in r \Longrightarrow \Delta $$ 
 
-where r is annotated with label at each AST level. $\Delta$ maps labels to sub-matches.
+where r is annotated with a label at each AST level. $\Delta$ maps labels to sub-matches.
 
 
 The mechanism
 -------------
 
-We use derivative (or partial derivative) operations to implement the word problem and the sub matching problem. See our recent papers (PPDP 12 )
+We use partial derivative operations to implement the word problem and the sub matching problem. See our recent papers (PPDP 12 )
 
 
 The debugging algorithm
@@ -90,7 +90,7 @@ The Refinement checking judgement
 
  * The problem
 
-Let  $\gamma$ denote the user specification, $w$ denote the input document , $r$ the pattern and  $r'$ the refined pattern, 
+Let  $\gamma$ denote the user specification, $w$ denote the input word , $r$ the pattern and  $r'$ the refined pattern, 
 we use the judgement 
 $$\gamma, r \vdash d : r'$$ 
 to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that accepts $w$.
@@ -99,8 +99,6 @@ to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that 
 
 \gamma ::= { (i, r) , ... , }
 i ::= 1,2,3,...
-
-
 
 
  * The gist of the algorithm 
@@ -159,6 +157,7 @@ i ::= 1,2,3,...
   UReq, r |= w : r' 
                  
 
+The user requirement is a mapping of labels to the regexs 
 
 > type UReq = [(Int, Re)]
 
@@ -198,7 +197,18 @@ r ::= () || (p|p) || pp || p* || l || \phi
 >     (==) Phi Phi = True
 >     (==) _ _ = False
 
+> pretty :: Re -> String
+> pretty (Choice _ rs) = "(" ++ interleave "|" (map pretty rs) ++ ")"
+> pretty (Pair _ r1 r2) = "(" ++ pretty r1 ++ "," ++ pretty r2 ++ ")"
+> pretty (Star _ r1) = pretty r1 ++ "*"
+> pretty (Ch _ c1) = [c1]
+> pretty (Eps _) = "()"
+> pretty Phi = "{}"
 
+> interleave :: String -> [String] -> String
+> interleave _ [] = ""
+> interleave _ [x] = x
+> interleave d (x:xs) = x ++ d ++ interleave d xs
 
 > posEmpty :: Re -> Bool
 > posEmpty (Eps _)        = True
@@ -239,10 +249,13 @@ containment check
 >    }
 > deriv r l = Choice dontcare (pderiv r l)
 
+semantic equivalence check
+
 > equiv :: Re -> Re -> Bool
 > equiv r1 r2 = r1 `contain` r2 && r2 `contain` r1
 
 
+the simplification 
 
 > collapse x y = nub (sort (x ++ y))
 > combine x y = nub (sort (x ++ y))
@@ -255,9 +268,6 @@ containment check
 > shift ls (Star ls' r) = Star (combine ls' ls) r
 > shift ls (Eps ls') = Eps (combine ls' ls)
 
-
-
-simplification 
 
 
 > simpl :: Re -> REnv -> (Re, REnv)
@@ -821,7 +831,8 @@ sortBy (\x y -> compareREnv (snd x) (snd y) )  (ref' [(g7,r7, IM.empty)] "(A)") 
 > main = do 
 >   [si] <- getArgs
 >   let i = read si
->   print $ (refine g5 r5 w) !! i
+>   print $ pretty r5        
+>   print $ pretty $ (refine g5 r5 w) !! i
 
 
 New idea: refinement algo takes ureq re pair and the input words returns a set of 
