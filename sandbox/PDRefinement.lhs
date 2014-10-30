@@ -100,6 +100,66 @@ to denote that under the user spec $\gamma$ , $r'$ is a replacement of $r$ that 
 \gamma ::= { (i, r) , ... , }
 i ::= 1,2,3,...
 
+
+
+
+ * The gist of the algorithm 
+                 e.g. given r =  (a)*(a)*
+                 The first (...) is 1
+                 The second (...) is 2
+                 
+                 w1 = "aa"
+                 
+                 the matches (1, "aa"), (2, "") or
+                             (1, "a"), (2, "a") or
+                             (1, ""), (2, "aa")                                  
+
+  but if w2 = "b"                 
+                 the match fail at
+                 pd (a*)(a*) b =
+                     [ r(a*)  | r <- pd (a*) b ] ++      --(1)
+                     pd (a*) b                           --(2)
+                 
+                 Note that pd (a*) b = [ ra* | r <- pd a b ] 
+                 
+  it could be due to the a in (1) or in (2)                 
+                 
+                 
+                 
+  a) The algorithm will try to avoid unnecessary changes e.g. refine (a|b) b  ->  ((a|b)|b)
+  b) Given a match failure (e.g pd r l = {} ), to fix it we either 
+                 1) add a transition e.g. (r|l)
+                 2) if  \eps \in r, add a transition and a new state (r,l)
+                 
+    in case of matching step (i.e. a pd-operation) we favor a) > b1) > b2)  
+  
+  In case of the existence of two equally good fixes based on the above ordering, we favor the choice which is specified by the user requirement. (Qn. Does it always give us the unique result?)
+                 Recall 
+                    refine (a*)(a*) b  gives us 
+                        ((a|b)*)(a*) or    --(3)
+                        (a*)((a|b)*) or    --(4)
+                        (a*)(a*)|b or      --(5)
+                        (a*)(a*)b          --(6)
+                        ...
+
+
+   User Requirement :: =  { x1 : r1, ... } 
+   where 'xi' are the location in the the regular expression src Loc
+                 say UR = {(2:(a|...|z)*)} 
+                 the algorithm will favor (4)
+                 
+
+  the algorithm is driven by the extension of the pd r l
+                 
+
+  The soundness of the algorithm                  
+  Replacement relation                   
+                 
+                   
+  UReq, r |= w : r' 
+                 
+
+
 > type UReq = [(Int, Re)]
 
 > lookupUR :: Int -> UReq -> Maybe Re
@@ -293,6 +353,9 @@ partial derivatives of regex
 >   pderiv rs l = concatMap (\r -> pderiv r l) rs
 
 * partial dervatives extended to user-requirement-regex pair
+
+
+TODO: check whether the following comments are still valid.
 
 We need to annotate the URPair with the recommendation info to 'disambiguate' the refinement process. 
 To elaborate, we first need to consider the extension of partial derivative operation over the user-requirement-regex pairs.
