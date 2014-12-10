@@ -347,21 +347,22 @@ highlight :: RE -> PDError -> String
 highlight Phi _ = "{}"
 highlight Empty _ = "<>"
 highlight (L l loc) (LabelMismatch loc' locs) 
-  | loc == loc' = ">" ++ show l ++ "<"
-  | loc `elem` locs = "[" ++ show l ++ "]"
-  | otherwise = show l
+  | loc == loc' = "@" ++ [ l ] ++ "@"
+  | loc `elem` locs = "_" ++ [ l ]++ "_"
+  | otherwise = [ l ]
 highlight (L l loc) (EmptyMismatch locs) 
-  | loc `elem` locs = "[" ++ show l ++ "]"
-  | otherwise = show l
+  | loc `elem` locs = "_" ++ [ l ]++ "_"
+  | otherwise = [ l ]
 highlight (Choice r1 r2) err = "(" ++ highlight r1  err  ++ "|" ++ highlight r2  err  ++ ")"
-highlight (Seq r1 r2) err  = "<" ++ highlight r1  err  ++ "," ++ highlight r2  err  ++ ">"
+highlight (Seq r1 r2) err  = -- "<" ++ highlight r1  err  ++ "," ++ highlight r2  err  ++ ">"
+  highlight r1  err  ++  highlight r2  err 
 highlight (Star r) err  = highlight r  err ++ "*" 
 highlight (Any loc) (LabelMismatch loc' locs) 
-  | loc == loc' = ">.<"
-  | loc `elem` locs = "[.]"
+  | loc == loc' = "@.@"
+  | loc `elem` locs = "_._"
   | otherwise = "."
 highlight (Any loc) (EmptyMismatch locs) 
-  | loc `elem` locs = "[.]"
+  | loc `elem` locs = "_._"
   | otherwise = "."
 highlight r err = error $ "can't handle " ++ show r ++ " " ++ show err
 
