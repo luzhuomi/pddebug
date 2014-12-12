@@ -775,7 +775,7 @@ r5' = Pair [1] p1 (Pair [2] p2 (Pair [3] p3 (Pair [4] p4 p5)))
         p4 = Pair [61] (Ch [62] '<') (Pair [63] (Ch [64] '/') (Pair [65] (Ch [66] 's') (Ch [67] '>')))
         p5 = Star [70] (anySym 80)
 g5' = [(50::Int, Pair [] (anyNum 90) (Star [] (anyNum 90)))]
-
+g5'' = [(50::Int, Pair [] (anySym 90) (Star [] (anySym 90)))]
 
 {-
 w1 = (A)

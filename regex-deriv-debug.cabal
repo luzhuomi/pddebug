@@ -22,6 +22,8 @@ library
   Build-Depends:	bitset, parallel, regex-pderiv
   Build-Depends:         base >= 4.0 && < 5.0, ghc-prim
   Exposed-Modules:       Text.Regex.PDeriv.Debug.Report
+                         Text.Regex.PDeriv.Debug.Refine
+                         Text.Regex.PDeriv.Debug.Refine2
   Buildable:              True
   Extensions:             GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
   GHC-Options:            -threaded -funbox-strict-fields
