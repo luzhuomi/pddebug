@@ -1392,8 +1392,16 @@ apply renv r =
   in case s of
     { Eps (i:_) -> 
          case IM.lookup i renv of 
-           { Just rs -> do 
-                { 
+           { Just ops -> do 
+                { let (trans,states,eps) = 
+                        foldl (\(ts,ss,es) op -> case op of 
+                                  { (RATr t _)  -> (ts++[t], ss, es)
+                                  ; (RASts t _) -> (ts, ss ++ [t], es)
+                                  ; (RMkFin  _) -> (ts, ss, True)
+                                  } ) ([],[],False) ops
+                ; ss' <- mapM (apply renv) ss
+                ; 
+
          
       
 
