@@ -889,7 +889,7 @@ compareREnv r2 r1 =
       sNC1 = countStrongNoCh r1
       sNC2 = countStrongNoCh r2
       sMF1 = countStrongMkFin r1
-      sMF2 = countStringMkFin r2
+      sMF2 = countStrongMkFin r2
 
       wTr1 = countWeakATr r1  
       wTr2 = countWeakATr r2
@@ -912,7 +912,7 @@ compareREnv r2 r1 =
                     ; others -> others }
                ; others -> others }
           ; others  -> others }
-     ; otherse -> others }
+     ; others -> others }
 
 
 -- count the number of ROps in renv
@@ -1021,9 +1021,9 @@ refine ureq r cs =
 
 ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
 ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply_` r) ] ++ 
-             [ renv' `combineEnv` renv |  -- try to fix those states which are non-final?
-                    | renv' <- mkFin r
-                    , (ureq, r, renv) <- urs
+             [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
+                    | (ureq, r, renv) <- urs
+                    , renv' <- mkFin r
                     , not (posEmpty (renv `apply_` r))
                     , any (\i -> case lookupUR i ureq of
                                  { Nothing -> False
@@ -1346,8 +1346,8 @@ urPDeriv ur c rlvl  = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c
 -- make a non empty regex to accepts epsilon, structurally
 mkFin :: Re -> [REnv]
 mkFin (Eps is)        = [IM.empty]
-mkFin (Ch is _)       = [IM.singleton (fst is) (RMkFin Strong)]
-mkFin (Any is)        = [IM.singleton (fst is) (RMkFin Strong)]
+mkFin (Ch is _)       = [IM.singleton (head is) [RMkFin Strong]]
+mkFin (Any is)        = [IM.singleton (head is) [RMkFin Strong]]
 mkFin (Pair is r1 r2) = [ renv1 `combineEnv` renv2 | renv1 <- mkFin r1, renv2 <- mkFin r2 ]
 mkFin (Choice is rs)  = mkFin r1 ++ mkFin r2
 mkFin (Star is r)     = [IM.empty] 
@@ -1390,21 +1390,109 @@ apply renv r =
       -- todo: this changes the renv' but it seems faster, not sure about correctness 
       -- more thoughts, maybe we shall split the simp into choice simplification and others non-choice simplification, because choice simplification is the only one that change the REnv.        
   in case s of
-    { Eps (i:_) -> 
+    { (Eps (i:_)) -> 
          case IM.lookup i renv of 
            { Just ops -> do 
-                { let (trans,states,eps) = 
+                { let (trans, states, eps) = 
                         foldl (\(ts,ss,es) op -> case op of 
                                   { (RATr t _)  -> (ts++[t], ss, es)
-                                  ; (RASts t _) -> (ts, ss ++ [t], es)
+                                  ; (RASt t _) -> (ts, ss ++ [t], es)
                                   ; (RMkFin  _) -> (ts, ss, True)
                                   } ) ([],[],False) ops
-                ; ss' <- mapM (apply renv) ss
-                ; 
-
-         
+                -- create a sequence concatenation out of the add-states ops
+                ; ss' <- mkSeqS =<< mapM (apply renv) states
+                -- create a choice out of the add transitions ops
+                ; tt' <- mkChoiceS trans
+                -- union the eps with ss' and tt'
+                ; mkChoiceS [ss',tt',s]
+                }
+           ; Nothing -> return s        
+           }
+    ; (Ch (i:_) c) ->
+           case IM.lookup i renv of 
+             { Just ops -> do 
+                  { let (trans, states, eps) = 
+                          foldl (\(ts,ss,es) op -> case op of 
+                                    { (RATr t _)  -> (ts++[t], ss, es)
+                                    ; (RASt t _)  -> (ts, ss ++ [t], es)
+                                    ; (RMkFin  _) -> (ts, ss, True)
+                                    ; _           -> (ts,ss,es)
+                                    } ) ([],[],False) ops
+                        -- create a sequence concatenation out of the add-states ops 
+                  ; ss' <- mkSeqS =<< mapM (apply renv) states
+                           -- append ss' to s
+                  ; ss'' <- mkSeqS [s, ss']
+                           -- create a choice out of the add transitions ops
+                  ; tt' <- mkChoiceS trans
+                           -- union tt' and eps with ss'' if there is mkFin, otherwise, just union tt' with ss''
+                  ; if eps 
+                    then do 
+                      { e <- mkEpsS 
+                      ; mkChoiceS [e,tt',ss'']
+                      }
+                    else mkChoiceS [tt',ss'']
+                  }
+             ; Nothing -> return s        
+             }
+    ; (Any (i:_)) -> 
+             case IM.lookup i renv of 
+               { Just ops -> do
+                    { let (trans, states, eps) = 
+                            foldl (\(ts,ss,es) op -> case op of 
+                                      { (RATr t _)  -> (ts++[t], ss, es)
+                                      ; (RASt t _)  -> (ts, ss ++ [t], es)
+                                      ; (RMkFin  _) -> (ts, ss, True)
+                                      ; _           -> (ts,ss,es)
+                                      } ) ([],[],False) ops
+                      ; if eps 
+                        then do  
+                          { e <- mkEpsS 
+                          ; mkChoiceS [e,s]
+                          }
+                        else return s
+                      }
+               ; Nothing -> return s
+               }
+    ; (Choice is rs) -> do 
+             { rs' <- mapM (apply renv) rs
+             ; return (Choice  is rs')
+             }
+    ; (Pair is r1 r2) -> do 
+             { r1' <- apply renv r1
+             ; r2' <- apply renv r2
+             ; return (Pair is r1' r2')
+             }
+    ; (Star is r) -> do 
+             { r' <- apply renv r
+             ; return (Star is r')
+             }
+    ; others -> return s 
+    }
+             
+mkSeqS :: [Re] -> State Env Re     
+mkSeqS [] = return Phi 
+mkSeqS (r:rs) = foldM (\a r -> do 
+                          { i <- incMaxId 
+                          ; return (Pair [i] a r)
+                          }) r rs
+                
+mkChoiceS :: [Re] -> State Env Re                
+mkChoiceS [] = do 
+  { i <- incMaxId 
+  ; return (Eps [i])
+  }
+mkChoiceS (r:rs) = do 
+  { i <- incMaxId
+  ; return (Choice [i] (r:rs))
+  }
+     
+mkEpsS :: State Env Re     
+mkEpsS = do 
+  { i <- incMaxId
+  ; return (Eps [i])
+  }
       
-
+{- 
 apply :: REnv -> Re -> State Env Re 
 apply renv' s = 
   let (r,renv) = simpl s renv' -- todo: this changes the renv' but it seems faster, not sure about correctness 
@@ -1447,7 +1535,7 @@ app :: Re -> [Re] -> Re
 app r [] = r
 app r (t:ts) = let is = getLabel r 
                in app (Pair is r (annotate is t)) ts
-
+-}
 
 combineEnv :: REnv -> REnv -> REnv 
 combineEnv renv1 renv2 = IM.unionWith (\x y -> (x ++ y)) renv1 renv2 -- don't nub here.
