@@ -1015,12 +1015,16 @@ ropSubsume rs1 rs2 = all (\r2 -> r2 `elem` rs1) rs2
 refine :: UReq -> Re -> [Char] -> [Re]
 refine ureq r cs = 
   let renvs = nub $ sortBy compareREnv (ref [(ureq, r, IM.empty)] cs)
-  in  map (\renv ->  apply_ renv r)  renvs
+      io = renvs `seq` logger ("refine "++ (show $ map (\renv -> " | " ++ show renv  ) renvs))
+  in {- io `seq` -} map (\renv ->  apply_ renv r)  renvs
 
 -- the main routine
 
 ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
-ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++ 
+ref urs [] =
+    let io = logger ("ref [] "++ (show $ map (\(_,r,renv) -> pretty r ++ " | " ++ show renv  ) urs))
+    in {- io `seq` -}
+     [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++ 
              [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
                     | (ureq, r, renv) <- urs
                     , renv' <- mkFin r
@@ -1028,12 +1032,13 @@ ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r
                     , any (\i -> case lookupUR i ureq of
                                  { Nothing -> False
                                  ; Just t  -> posEmpty t }) (getLabel r) ]
+
 ref urs (l:w) = let 
                     urs' = concatMap (\ (ur,r,renv) -> 
                                     let urs'' = urePDeriv (ur, r, renv) l
-                                    in  prune3 r $ prune4 $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
-                    io = logger ("ref " ++ (l:w))
-                in io `seq` ref urs' w
+                                    in  {- prune3 r $ prune4 $ -} map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
+                    io = logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,_) -> pretty r) urs) ++ " " ++ (show $ map (\(_,r,_) -> pretty r) urs') )
+                in {- io `seq` -} ref urs' w
 
 
 
@@ -1157,10 +1162,12 @@ choiceAlts (Any _ ) _ _ = False
 
 urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
 urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of the labels DO NOT appear in r, because r is just a partial derivatives!
-  let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
+  let 
+      max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
-  in [ (ur', r''', psi'') | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
-                            let r'' = r', -- run_ e (psi' `apply_` r'),  -- we can only apply simplification after we apply psi' to r' 
+      io = logger ("urePDeriv: " ++  show ur ++ "|" ++ pretty r ++ "|" ++ show l ++ "|" ++  show t)
+  in io `seq` [ (ur', r''', psi'' `combineEnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
+                            let r'' = r', -- run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
                             let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
                             let (r''',psi'') = {- io `seq` -} simpl  r'' psi' ,
                             not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
@@ -1409,8 +1416,8 @@ apply renv r =
                 -- union the eps with ss' and tt'
                 ; case (trans,states) of
                   { ([], [])    -> return s
-                  ; ((_:_), []) -> mkChoiceS [ss',s]
-                  ; ([], (_:_)) -> mkChoiceS [tt',s] 
+                  ; ([], (_:_)) -> mkChoiceS [ss',s]
+                  ; ((_:_),[] ) -> mkChoiceS [tt',s] 
                   ; (_,  _)     -> mkChoiceS [ss',tt',s]
                   }
                 }
@@ -1439,16 +1446,16 @@ apply renv r =
                       { e <- mkEpsS 
                       ; case (trans,states) of
                         { ([], []) -> mkChoiceS [e, s]
-                        ; ((_:_), []) -> mkChoiceS [e,ss'']
-                        ; ([], (_:_)) -> mkChoiceS [e, tt',s] 
+                        ; ([], (_:_)) -> mkChoiceS [e,ss'']
+                        ; ((_:_), []) -> mkChoiceS [e, tt',s] 
                         ; (_,  _)     -> mkChoiceS [e, tt',ss'']
                         }                           
                       }
                     else 
                       case (trans,states) of
                         { ([], []) -> return s 
-                        ; ((_:_), []) -> return ss''
-                        ; ([], (_:_)) -> mkChoiceS [tt',s] 
+                        ; ([], (_:_)) -> return ss''
+                        ; ((_:_), []) -> mkChoiceS [tt',s] 
                         ; (_,  _)     -> mkChoiceS [tt',ss'']
                         } 
                   }
