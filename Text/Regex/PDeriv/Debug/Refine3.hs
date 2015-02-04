@@ -1404,7 +1404,12 @@ apply renv r =
                 -- create a choice out of the add transitions ops
                 ; tt' <- mkChoiceS trans
                 -- union the eps with ss' and tt'
-                ; mkChoiceS [ss',tt',s]
+                ; case (trans,states) of
+                  { ([], [])    -> return s
+                  ; ((_:_), []) -> mkChoiceS [ss',s]
+                  ; ([], (_:_)) -> mkChoiceS [tt',s] 
+                  ; (_,  _)     -> mkChoiceS [ss',tt',s]
+                  }
                 }
            ; Nothing -> return s        
            }
@@ -1425,12 +1430,24 @@ apply renv r =
                            -- create a choice out of the add transitions ops
                   ; tt' <- mkChoiceS trans
                            -- union tt' and eps with ss'' if there is mkFin, otherwise, just union tt' with ss''
+                           
                   ; if eps 
                     then do 
                       { e <- mkEpsS 
-                      ; mkChoiceS [e,tt',ss'']
+                      ; case (trans,states) of
+                        { ([], []) -> mkChoiceS [e, s]
+                        ; ((_:_), []) -> mkChoiceS [e,ss'']
+                        ; ([], (_:_)) -> mkChoiceS [e, tt',s] 
+                        ; (_,  _)     -> mkChoiceS [e, tt',ss'']
+                        }                           
                       }
-                    else mkChoiceS [tt',ss'']
+                    else 
+                      case (trans,states) of
+                        { ([], []) -> return s 
+                        ; ((_:_), []) -> return ss''
+                        ; ([], (_:_)) -> mkChoiceS [tt',s] 
+                        ; (_,  _)     -> mkChoiceS [tt',ss'']
+                        } 
                   }
              ; Nothing -> return s        
              }
