@@ -1020,11 +1020,11 @@ refine ureq r cs =
 -- the main routine
 
 ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
-ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty (renv `apply_` r) ] ++ 
+ref urs [] = [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++ 
              [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
                     | (ureq, r, renv) <- urs
                     , renv' <- mkFin r
-                    , not (posEmpty (renv `apply_` r))
+                    , not (posEmpty {- (renv `apply_` r) -} r)
                     , any (\i -> case lookupUR i ureq of
                                  { Nothing -> False
                                  ; Just t  -> posEmpty t }) (getLabel r) ]
@@ -1032,7 +1032,8 @@ ref urs (l:w) = let
                     urs' = concatMap (\ (ur,r,renv) -> 
                                     let urs'' = urePDeriv (ur, r, renv) l
                                     in  prune3 r $ prune4 $ map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
-                in ref urs' w
+                    io = logger ("ref " ++ (l:w))
+                in io `seq` ref urs' w
 
 
 
@@ -1159,7 +1160,7 @@ urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of t
   let max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
   in [ (ur', r''', psi'') | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
-                            let r'' = run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
+                            let r'' = r', -- run_ e (psi' `apply_` r'),  -- we can only apply simplification after we apply psi' to r' 
                             let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
                             let (r''',psi'') = {- io `seq` -} simpl  r'' psi' ,
                             not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
@@ -1379,28 +1380,30 @@ limit ur is = filter (\(i,_) -> i `elem` is) ur
 apply_ :: REnv -> Re -> Re 
 apply_ renv r = let is = concatMap getLabels $ resInROps (concatMap snd (IM.toList renv)) 
                     max_i = maximum $ (getLabels r) ++ is
-                in run_ (Env max_i) (apply renv r)
+                    io = logger "apply_ \n ============================================================================\n ============================================================================\n ============================================================================\n ============================================================================"
+                in {- io `seq` -} run_ (Env max_i) (apply renv r)
 
 
 -- note that for all (i,ROp) \in renv, i is a label to leaf node 
 
 apply :: REnv -> Re -> State Env Re 
 apply renv r = 
-  let (s,renv') = simpl r renv 
+  let io = logger ("applying " ++ pretty r)
+      (s,renv') = {- io `seq` -} simpl r renv 
       -- todo: this changes the renv' but it seems faster, not sure about correctness 
       -- more thoughts, maybe we shall split the simp into choice simplification and others non-choice simplification, because choice simplification is the only one that change the REnv.        
   in case s of
     { (Eps (i:_)) -> 
-         case IM.lookup i renv of 
+         case IM.lookup i renv' of 
            { Just ops -> do 
                 { let (trans, states, eps) = 
                         foldl (\(ts,ss,es) op -> case op of 
                                   { (RATr t _)  -> (ts++[t], ss, es)
-                                  ; (RASt t _) -> (ts, ss ++ [t], es)
+                                  ; (RASt t _)  -> (ts, ss ++ [t], es)
                                   ; (RMkFin  _) -> (ts, ss, True)
                                   } ) ([],[],False) ops
                 -- create a sequence concatenation out of the add-states ops
-                ; ss' <- mkSeqS =<< mapM (apply renv) states
+                ; ss' <- mkSeqS =<< mapM (apply renv') states
                 -- create a choice out of the add transitions ops
                 ; tt' <- mkChoiceS trans
                 -- union the eps with ss' and tt'
@@ -1414,17 +1417,17 @@ apply renv r =
            ; Nothing -> return s        
            }
     ; (Ch (i:_) c) ->
-           case IM.lookup i renv of 
+           case IM.lookup i renv' of 
              { Just ops -> do 
                   { let (trans, states, eps) = 
                           foldl (\(ts,ss,es) op -> case op of 
                                     { (RATr t _)  -> (ts++[t], ss, es)
                                     ; (RASt t _)  -> (ts, ss ++ [t], es)
                                     ; (RMkFin  _) -> (ts, ss, True)
-                                    ; _           -> (ts,ss,es)
+                                    ; _           -> (ts, ss, es)
                                     } ) ([],[],False) ops
                         -- create a sequence concatenation out of the add-states ops 
-                  ; ss' <- mkSeqS =<< mapM (apply renv) states
+                  ; ss' <- mkSeqS =<< mapM (apply renv') states
                            -- append ss' to s
                   ; ss'' <- mkSeqS [s, ss']
                            -- create a choice out of the add transitions ops
@@ -1452,7 +1455,7 @@ apply renv r =
              ; Nothing -> return s        
              }
     ; (Any (i:_)) -> 
-             case IM.lookup i renv of 
+             case IM.lookup i renv' of 
                { Just ops -> do
                     { let (trans, states, eps) = 
                             foldl (\(ts,ss,es) op -> case op of 
@@ -1471,17 +1474,17 @@ apply renv r =
                ; Nothing -> return s
                }
     ; (Choice is rs) -> do 
-             { rs' <- mapM (apply renv) rs
+             { rs' <- mapM (apply renv') rs
              ; return (Choice  is rs')
              }
     ; (Pair is r1 r2) -> do 
-             { r1' <- apply renv r1
-             ; r2' <- apply renv r2
+             { r1' <- apply renv' r1
+             ; r2' <- apply renv' r2
              ; return (Pair is r1' r2')
              }
-    ; (Star is r) -> do 
-             { r' <- apply renv r
-             ; return (Star is r')
+    ; (Star is r') -> do 
+             { r'' <- apply renv' r'
+             ; return (Star is r'')
              }
     ; others -> return s 
     }
