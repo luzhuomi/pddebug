@@ -107,6 +107,8 @@ i ::= 1,2,3,...
 
 -} 
 
+type SrcLoc = Int
+
 -- ^ The user requirement is a mapping of labels to the regexs 
 
 type UReq = [(Int, Re)]
@@ -712,6 +714,11 @@ $ { \gamma, r } \models d : { r1', ... , rn' } $ implies $\gamma, r \vdash d : r
 
 -}
 
+
+-- r0 = A*
+
+r0 = Star [1] (Ch [2] 'A')
+
                           
 -- r1 = (A|B)*
 
@@ -719,7 +726,9 @@ r1 = Star [1] (Choice [2] [Ch [3] 'A', Ch [4] 'B'])
 
 -- r2 = (A|B|C)*
 
-r2 = Star [1] (Choice [2] [Ch [3] 'A'])
+r2 = Star [1] (Choice [2] [Ch [3] 'A', Ch [4] 'B', Ch [5] 'C'])
+
+
 
 
 r3 = Pair [1] (Ch [2] 'A') (Ch [3] 'B')
@@ -1009,22 +1018,26 @@ ropSubsume :: [ROp] -> [ROp] -> Bool
 ropSubsume rs1 rs2 = all (\r2 -> r2 `elem` rs1) rs2
 
 
-
 -- top level function
 
 refine :: UReq -> Re -> [Char] -> [Re]
 refine ureq r cs = 
   let renvs = nub $ sortBy compareREnv (ref [(ureq, r, IM.empty)] cs)
       io = renvs `seq` logger ("refine "++ (show $ map (\renv -> " | " ++ show renv  ) renvs))
-  in {- io `seq` -} map (\renv ->  apply_ renv r)  renvs
+  in {- io `seq` -} 
+     map (\renv ->  apply_ renv r)  renvs
 
 -- the main routine
+-- calling urepderiv to apply the R|-^L r/l => { R,r,\sigma } over l1,...,ln
+-- the \sigma(s) are propogated by urepderiv 
+-- we also prune away redundant states
+-- 
 
 ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
 ref urs [] =
-    let io = logger ("ref [] "++ (show $ map (\(_,r,renv) -> pretty r ++ " | " ++ show renv  ) urs))
+    let io = logger ("ref [] "++ (show $ map (\(_,r,renv) -> pretty r ++ " | " {- ++ show renv -}) urs))
     in {- io `seq` -}
-     [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++ 
+     [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++      
              [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
                     | (ureq, r, renv) <- urs
                     , renv' <- mkFin r
@@ -1032,23 +1045,19 @@ ref urs [] =
                     , any (\i -> case lookupUR i ureq of
                                  { Nothing -> False
                                  ; Just t  -> posEmpty t }) (getLabel r) ]
-
-ref urs (l:w) = let 
-                    urs' = concatMap (\ (ur,r,renv) -> 
-                                    let urs'' = urePDeriv (ur, r, renv) l
-                                    in  {- prune3 r $ prune4 $ -} map (\(ur', r', renv') -> (ur', r',  combineEnv renv renv')) urs'') urs
-                    io = logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,_) -> pretty r) urs) ++ " " ++ (show $ map (\(_,r,_) -> pretty r) urs') )
-                in {- io `seq` -} ref urs' w
+ref urs (l:w) = 
+    let urs' = concatMap (\ (ur,r,renv) ->  prune3 r $ prune4 $ urePDeriv (ur, r, renv) l) urs 
+        io = logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
+    in  io `seq`  ref urs' w
 
 
-
-
+-- a debugging functin
 ref' :: [(UReq, Re, REnv)] -> [Char] -> [(Re,REnv)]
 ref' urs [] = [ (r,renv) | (ureq, r, renv) <- urs ] 
 ref' urs (l:w) = let 
                      urs' = concatMap (\ (ur,r,renv) -> 
                                     let urs'' = urePDeriv (ur, r, renv) l
-                                    in  prune3 r $ prune4 $ map (\(ur', r', renv') -> 
+                                    in  prune3 r $ prune4  $ map (\(ur', r', renv') -> 
                                                    let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineEnv renv renv')  )
                                                    in  (ur', r',  combineEnv renv renv')) urs'') urs
                  in ref' urs' w
@@ -1144,7 +1153,8 @@ prune4 ((x@(_,_,renv)):xs) | hasDupROps renv = prune4 xs
 hasDupROps :: REnv -> Bool 
 hasDupROps renv = let ps = IM.toList renv 
                   in any (\(k,rops) -> 
-                      let rops' = filter (not . isRNoCh) rops in length (nub rops') /= length rops') ps
+                      let rops' = filter (not . isRNoCh) rops 
+                      in length (nub rops') /= length rops') ps
 
 -- check whether the two labels are siblings under the choice sub-exp in r
 
@@ -1161,18 +1171,51 @@ choiceAlts (Any _ ) _ _ = False
 
 
 urePDeriv :: (UReq, Re, REnv) -> Char -> [(UReq, Re, REnv)]
-urePDeriv (ur, r, psi) l = -- pre-cond: psi has been applied to r. No, some of the labels DO NOT appear in r, because r is just a partial derivatives!
+urePDeriv (ur, r, psi) l = 
   let 
       max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
       io = logger ("urePDeriv: " ++  show ur ++ "|" ++ pretty r ++ "|" ++ show l ++ "|" ++  show t)
-  in io `seq` [ (ur', r''', psi'' `combineEnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
+  in {- io `seq` -} [ (ur', r''', psi'' `combineEnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
                             let r'' = r', -- run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
                             let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
                             let (r''',psi'') = {- io `seq` -} simpl  r'' psi' ,
-                            not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
+                            not (redundantREnv psi'' r) ] 
+                            -- not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
 
 
+-- check whether REnv is redundant w.r.t to r
+redundantREnv :: REnv -> Re -> Bool
+redundantREnv renv r = 
+  let srcAndOps = IM.toList renv
+  in any (\(src,ops) -> redundantOps src ops r) srcAndOps
+     where redundantOps :: SrcLoc -> [ROp] -> Re -> Bool
+           redundantOps i ops r = 
+             let (aTrOps, aStOps, isMadeFin) = 
+                   foldl (\(ts,ss,es) op -> case op of 
+                             { (RATr _ _)  -> (ts++[op], ss, es)
+                             ; (RASt _ _)  -> (ts, ss ++ [op], es)
+                             ; (RMkFin  _) -> (ts, ss, True)
+                             ; _           -> (ts, ss, es)
+                             } ) ([],[],False) ops     
+             in any (\aTrOp -> redundantRATr i aTrOp r) aTrOps
+                -- check whether (i, {RATr l}) is redundant
+                -- since i is a leaf node in r
+                -- the rop is redunant if l is already sibling under the choice + operator w.r.t i in r.
+                -- e.g.  (2, RAtr (3:a)) is redundant w.r.t to (1:a+2:b)
+           redundantRATr :: SrcLoc -> ROp -> Re -> Bool 
+           redundantRATr i (RATr t _) r = 
+             let ts = choiceSiblings r i
+             in t `elem` ts
+           
+choiceSiblings :: Re -> SrcLoc -> [Re]
+choiceSiblings (Choice _ rs) i | i `elem` (concatMap getLabel rs) = rs -- TODO:  choice can be nested.
+                               | otherwise = concatMap (\r -> choiceSiblings r i) rs
+choiceSiblings (Pair _ r1 r2) i = choiceSiblings r1 i ++ choiceSiblings r2 i
+choiceSiblings (Star _ r) i = choiceSiblings r i
+choiceSiblings _ _ = []
+
+{-
 isRedundant :: REnv -> Re -> REnv -> Re -> Bool 
 isRedundant renv1 r1 renv2 r2 = 
   let diff = diffREnv renv2 renv1
@@ -1197,7 +1240,7 @@ diffREnv r2 r1 =
       { Nothing -> acc ++ [(k,rops)]
       ; Just rops' -> acc ++ [(k,filter (\rop -> not (rop `elem` rops')) rops)] } ) [] ps
  in IM.fromList ps'
-
+-}
 
 
 
@@ -1241,6 +1284,7 @@ incMaxId = do
  ; setMaxId next_i                    
  ; return next_i 
  }
+
 
 
 urPDeriv :: (UReq, Re) -> Char -> RLevel -> State Env [(UReq, Re, REnv)]
@@ -1508,6 +1552,7 @@ mkChoiceS [] = do
   { i <- incMaxId 
   ; return (Eps [i])
   }
+mkChoiceS [r] = return r
 mkChoiceS (r:rs) = do 
   { i <- incMaxId
   ; return (Choice [i] (r:rs))
