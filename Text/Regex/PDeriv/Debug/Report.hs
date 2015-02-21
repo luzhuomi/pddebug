@@ -12,6 +12,7 @@ module Text.Regex.PDeriv.Debug.Report where
 
 
 import Control.Monad
+import Control.Applicative
 import Data.List 
 import Data.Bits
 import Data.Char (ord)
@@ -72,6 +73,7 @@ instance Show RE where
 
 newtype State s a = State { runState :: (s -> (a,s)) } 
  
+                    
 instance Monad (State s) where
    -- return :: a -> State s a
    return a        = State (\s -> (a,s))
@@ -79,6 +81,24 @@ instance Monad (State s) where
    (State x) >>= f = State (\s -> let (a,s') = x s 
                                       stb = f a
                                   in (runState stb) s')
+                     
+                     
+                     
+-- this is required for GHC 7.10 the monad-applicative proposal
+instance Functor (State s) where   
+  -- fmap :: (a -> b) -> State s a -> State s b
+  fmap f (State x) = State (\s -> let (a,s') = x s
+                                  in (f a, s'))
+   
+instance Applicative (State s) where                    
+  -- pure :: a -> State s a
+  pure a  = State (\s -> (a,s))
+  -- (<*>) :: State s (a -> b) -> State s a -> State s b
+  (State g) <*> (State x) = State (\s -> let (f,s')  = g s
+                                             (a,s'') = x s'
+                                         in (f a, s''))
+
+
 
 run :: s -> State s a -> (a,s)
 run s sta = (runState sta) s
@@ -168,6 +188,24 @@ instance Monad (DMonad s) where
    return a = DMonad (\h -> (a,h) )
    (DMonad x) >>= f = DMonad (\h -> let (a, h') = x h 
                                     in runDM (f a) h')
+
+
+
+-- this is required for GHC 7.10 the monad-applicative proposal
+instance Functor (DMonad s) where   
+  -- fmap :: (a -> b) -> DMonad s a -> DMonad s b
+  fmap f (DMonad x) = DMonad (\s -> let (a,s') = x s
+                                    in (f a, s'))
+   
+instance Applicative (DMonad s) where                    
+  -- pure :: a -> DMonad s a
+  pure a  = DMonad (\s -> (a,s))
+  -- (<*>) :: DMonad (a -> b) -> DMonad s a -> DMonad s b
+  (DMonad g) <*> (DMonad x) = DMonad (\s -> let (f,s')  = g s
+                                                (a,s'') = x s'
+                                                stb = f a
+                                            in (f a, s''))
+
 
 
 
@@ -271,10 +309,28 @@ instance Monad (PDMonad t e) where
    -- return :: a -> PDMonad t e a
    return a        = PDMonad (\h -> ([(a,h)],[]))
    -- >>= :: PDMonad t e a -> (a -> PDMonad t e b) -> PDMonad t e b
-   (PDMonad x) >>= f = PDMonad (\h -> let (succ'ed,failed) = x h
-                                          (ahs, failed') = unzip [ runPDM (f a) h' | (a,h') <- succ'ed ] 
-                                      in (concat ahs, failed ++ (concat failed')))
-
+   (PDMonad x) >>= f = 
+     PDMonad (\h -> let (succ'ed,failed) = x h
+                        (ahs, failed') = unzip [ runPDM (f a) h' | (a,h') <- succ'ed ] 
+                    in (concat ahs, failed ++ (concat failed')))
+                       
+                       
+instance Functor (PDMonad t e) where                       
+  -- fmap :: (a -> b) -> PDMonad t e a -> PDMonad t e b
+  fmap f (PDMonad x) = PDMonad (\h -> let (succ'ed,failed) = x h
+                                      in (map (\(a,h) -> (f a, h)) succ'ed, failed)) 
+                       
+instance Applicative (PDMonad t e) where                       
+  -- pure :: a -> PDMonad t e a
+  pure a = PDMonad (\h -> ([(a,h)],[]))
+  -- <*> :: PDMonad t e (a -> b) -> PDMonad t e a -> PDMonad t e b
+  (PDMonad g) <*> (PDMonad x) = 
+    PDMonad (\s -> let (succ'ed,failed) = g s
+                       -- for each f, we apply it to all the 'a's coming from x h' where h' is the resulting state of successful f
+                       (bhss, fails) = unzip [ (map (\(a,h) -> (f a,h)) ahs, failed) | (f,h') <- succ'ed, let (ahs,failed) = x h' ]
+                   in (concat bhss, concat fails))
+    
+    
 data PDError = LabelMismatch Loc [Loc]
              | EmptyMismatch [Loc]
              | PhiMismatch [Loc] deriving (Show, Eq)
@@ -285,11 +341,18 @@ getLocs (EmptyMismatch ls)   = ls
 getLocs (PhiMismatch ls)     = ls
 
 instance MonadPlus (PDMonad [Loc] PDError) where
-   mzero = PDMonad (\ls -> ([],[]))
-   p `mplus` q = PDMonad (\ls -> let (x,y) = runPDM p ls 
-                                     (w,z) = runPDM q ls
-                                 in (x ++ w, y ++ z))
+  -- mzero :: PDMonad [Loc] PDError a
+  mzero = PDMonad (\ls -> ([],[]))
+  -- mplus :: PDMonad [Loc] PDError a -> PDMonad [Loc] PDError a -> PDMonad [Loc] PDError a
+  p `mplus` q = PDMonad (\ls -> let (x,y) = runPDM p ls 
+                                    (w,z) = runPDM q ls
+                                in (x ++ w, y ++ z))
 
+instance Alternative (PDMonad [Loc] PDError) where
+  empty = PDMonad (\ls -> ([],[]))
+  p <|> q = PDMonad (\ls -> let (x,y) = runPDM p ls 
+                                (w,z) = runPDM q ls
+                            in (x ++ w, y ++ z))
                   
 -- nubM does not really work, because the duplicate is introduced via the >>= operation.
 
