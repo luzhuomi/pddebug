@@ -74,7 +74,7 @@ The Refinement checking judgement
 -}
 
 
-module Text.Regex.PDeriv.Debug.Refine3 where
+module Text.Regex.PDeriv.Debug.Refine4 where
 
 import System.Environment 
 import qualified Data.Map as M
@@ -891,7 +891,9 @@ resInREnv renv =
 
 compareREnv :: REnv -> REnv -> Ordering
 compareREnv r2 r1 = 
-  let sTr1 = countStrongATr r1  
+  let c1   = renvSize r1
+      c2   = renvSize r2
+      sTr1 = countStrongATr r1  
       sTr2 = countStrongATr r2
       sSt1 = countStrongASt r1
       sSt2 = countStrongASt r2
@@ -909,19 +911,21 @@ compareREnv r2 r1 =
       wMF1 = countWeakMkFin r1
       wMF2 = countWeakMkFin r2
 
-  in case compare sNC1 sNC2 of 
-     { EQ -> case compare sMF1 sMF2 of
-          { EQ -> case compare sTr1 sTr2 of
-               { EQ -> case compare sSt1 sSt2 of
-                    { EQ -> case compare wNC1 wNC2 of
-                         { EQ -> case compare wMF1 wMF2 of
-                              { EQ -> compare wTr1 wTr2
-                              ; others -> others }
-                         ; others -> others }  
-                    ; others -> others }
-               ; others -> others }
-          ; others  -> others }
-     ; others -> others }
+  in case compare c2 c1 of
+    { EQ -> case compare sNC1 sNC2 of 
+         { EQ -> case compare sMF1 sMF2 of
+              { EQ -> case compare sTr1 sTr2 of
+                   { EQ -> case compare sSt1 sSt2 of
+                        { EQ -> case compare wNC1 wNC2 of
+                             { EQ -> case compare wMF1 wMF2 of
+                                  { EQ -> compare wTr1 wTr2   
+                                  ; others -> others }
+                             ; others -> others }  
+                        ; others -> others }
+                   ; others -> others }
+              ; others  -> others }
+         ; others -> others }
+    ; others -> others }
 
 
 -- count the number of ROps in renv
@@ -972,6 +976,8 @@ isStrong (RASt _ Strong) = True
 isStrong (RASt _ _) = False
 isStrong (RNoCh Strong) = True                         
 isStrong (RNoCh _) = False
+isStrong (RMkFin Strong) = True
+isStrong (RMkFin _) = False
 
 isWeak :: ROp -> Bool
 isWeak (RATr _ Weak) = True                         
@@ -980,6 +986,8 @@ isWeak (RASt _ Weak) = True
 isWeak (RASt _ _) = False
 isWeak (RNoCh Weak) = True                         
 isWeak (RNoCh _) = False
+isWeak (RMkFin Weak) = True
+isWeak (RMkFin _) = False
 
 isRATr :: ROp -> Bool
 isRATr (RATr _ _) = True
@@ -1343,8 +1351,9 @@ urPDeriv (ur, Pair (i:is) r1 r2) l rlvl =
               } 
                 | otherwise   -> do 
               { let ur2 =  ur `limit` fv r2 
-              ; t1 <-  urPDeriv (ur `limit` (fv r1), r1) l Strong 
-              ; return [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1] 
+              ; t1 <- urPDeriv (ur `limit` (fv r1), r1) l Strong 
+              ; t2 <- urPDeriv (ur2, r2) l Strong
+              ; return $ [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1] ++ [ (ur', r2', renv `combineEnv` renv') | (ur', r2', renv) <- t2, renv' <- mkFin r1 ]
               }
           }
     ; Nothing | posEmpty r1 -> do 
@@ -1354,8 +1363,10 @@ urPDeriv (ur, Pair (i:is) r1 r2) l rlvl =
           ; return $ [ ((ur' ++ ur2) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <-  t1 ] ++ t2
           }
               | otherwise   -> do 
-          { t1 <- urPDeriv (ur `limit` (fv r1), r1) l rlvl
-          ; return [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1 ]
+          { let ur2 =  ur `limit` fv r2
+          ; t1 <- urPDeriv (ur `limit` (fv r1), r1) l rlvl
+          ; t2 <- urPDeriv (ur2, r2) l rlvl 
+          ; return $ [ ((ur' ++ ur `limit` (fv r2)) , (Pair (i:is) r1' r2), renv) |  (ur', r1', renv) <- t1 ] ++ [ (ur', r2', renv `combineEnv` renv') | (ur', r2', renv) <- t2, renv' <- mkFin r1 ]
           }
     }
 urPDeriv (ur, Choice (i:is) rs) l rlvl = 
@@ -1395,11 +1406,11 @@ urPDeriv (ur, Star (i:is) r) l rlvl  =
       }
 urPDeriv ur c rlvl  = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
 
--- make a non empty regex to accepts epsilon, structurally
+-- make a non empty regex to accepts epsilon, structurally --todo shall we consider the ureq?
 mkFin :: Re -> [REnv]
 mkFin (Eps is)        = [IM.empty]
-mkFin (Ch is _)       = [IM.singleton (head is) [RMkFin Strong]]
-mkFin (Any is)        = [IM.singleton (head is) [RMkFin Strong]]
+mkFin (Ch is _)       = [IM.singleton (head is) [RMkFin Weak]]
+mkFin (Any is)        = [IM.singleton (head is) [RMkFin Weak]]
 mkFin (Pair is r1 r2) = [ renv1 `combineEnv` renv2 | renv1 <- mkFin r1, renv2 <- mkFin r2 ]
 mkFin (Choice is rs)  = mkFin r1 ++ mkFin r2
 mkFin (Star is r)     = [IM.empty] 

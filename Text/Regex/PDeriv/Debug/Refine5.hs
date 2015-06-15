@@ -89,6 +89,8 @@ import Control.Monad.ST
 import Data.STRef
 import Control.Monad
  
+  
+import Text.Regex  
 
 logger mesg =  unsafePerformIO $ print mesg
 
