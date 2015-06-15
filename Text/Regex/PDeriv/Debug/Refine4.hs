@@ -111,7 +111,7 @@ type SrcLoc = Int
 
 -- ^ The user requirement is a mapping of labels to the regexs 
 
-type UReq = [(Int, Re)]
+type UReq = [(Int, Re)] -- maybe we should consider IntMap
 
 lookupUR :: Int -> UReq -> Maybe Re
 lookupUR i env = lookup i env
@@ -1463,6 +1463,7 @@ apply renv r =
                                   { (RATr t _)  -> (ts++[t], ss, es)
                                   ; (RASt t _)  -> (ts, ss ++ [t], es)
                                   ; (RMkFin  _) -> (ts, ss, True)
+                                  ; _           -> (ts, ss, es)
                                   } ) ([],[],False) ops
                 -- create a sequence concatenation out of the add-states ops
                 ; ss' <- mkSeqS =<< mapM (apply renv') states
@@ -1526,13 +1527,22 @@ apply renv r =
                                       ; (RMkFin  _) -> (ts, ss, True)
                                       ; _           -> (ts,ss,es)
                                       } ) ([],[],False) ops
-                      ; if eps 
-                        then do  
-                          { e <- mkEpsS 
-                          ; mkChoiceS [e,s]
-                          }
-                        else return s
+                    ; ss' <- mkSeqS =<< mapM (apply renv') states
+                             -- append ss' to s
+                    ; ss'' <- mkSeqS [s, ss']
+                    ; case states of 
+                      { [] | eps -> do  
+                           { e <- mkEpsS 
+                           ; mkChoiceS [e,s]
+                           }
+                           | otherwise -> return s
+                      ; (_:_) | eps -> do 
+                           { e <- mkEpsS 
+                           ; mkChoiceS [e,ss'']
+                           }
+                              | otherwise -> return ss''
                       }
+                    }
                ; Nothing -> return s
                }
     ; (Choice is rs) -> do 
