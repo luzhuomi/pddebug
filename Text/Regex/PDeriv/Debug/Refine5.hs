@@ -90,7 +90,21 @@ import Data.STRef
 import Control.Monad
  
   
-import Text.Regex  
+import Text.Regex.PDeriv.Parse
+-- import qualified Text.Regex.PDeriv.RE as R
+-- import Text.Regex.PDeriv.IntPattern
+import Text.Regex.PDeriv.ExtPattern
+
+
+{-
+import Data.Char
+import Text.ParserCombinators.Parsec((<|>), (<?>),
+                                     unexpected, try, runParser, many, getState, setState, CharParser, ParseError,
+                                     sepBy1, option, notFollowedBy, many1, lookAhead, eof, between,
+                                     string, oneOf, noneOf, digit, char, anyChar)
+import Control.Monad(liftM, when, guard)
+-}
+
 
 logger mesg =  unsafePerformIO $ print mesg
 
@@ -1650,4 +1664,245 @@ showL xs = do
 
 
 
+{- cheaper hack 
+parse :: String -> Maybe Re
+parse s = 
+  case parsePat s of
+    Left err -> Nothing 
+    Right pat -> Just (patToRe pat)
+    
+    
 
+patToRe :: Pat -> Re
+patToRe (PVar i _ p) = 
+  let r = patToRe p
+  in r -- todo relabel r using i
+patToRe (PPair p1 p2) = Pair dontcare (patToRe p1) (patToRe p2)
+patToRe (PChoice p1 p2 _) = Choice dontcare [patToRe p1, patToRe p2]
+patToRe (PStar p _) = Star dontcare (patToRe p)
+patToRe (PE r) = reToRe r
+patToRe p = error $ "patToRe: unhandle pattern " ++ (show p)
+  
+            
+reToRe :: R.RE -> Re            
+reToRe R.Empty = Eps dontcare
+reToRe (R.L c) = Ch dontcare c
+reToRe (R.Choice r1 r2 _) = Choice dontcare [reToRe r1, reToRe r2]
+reToRe (R.Seq r1 r2) = Pair dontcare (reToRe r1) (reToRe r2)
+reToRe (R.Star r _ ) = Star dontcare (reToRe r)
+reToRe R.Any = Any dontcare
+reToRe r = error $ "reToRe: unhandle pattern " ++ (show r)
+
+
+-}
+
+
+parse :: String -> Maybe Re
+parse s = case parseEPat x of 
+  { Left error -> Nothing
+  ; Right (epat, estate) -> Right (internalize epat)
+  }
+          
+
+data TState = TSTate { ngi :: NGI
+                     , gi :: GI
+                     , anchorStart :: Bool
+                     , anchorEnd :: Bool
+                     }
+          
+type NGI = Int -- the non group index
+
+type GI = Int -- the group index
+
+
+initTState = TState { ngi = -3, gi = 1, anchorStart = False, anchorEnd = False } 
+
+
+getNGI :: State TState NGI
+getNGI = do { st <- get
+            ; return $ ngi st
+            }
+
+getIncNGI :: State TState NGI -- get then increase
+getIncNGI = do { st <- get
+               ; let i = ngi st
+               ; put st{ngi=(i-1)} 
+               ; return i
+               }
+
+getGI :: State TState GI
+getGI = do { st <- get
+           ; return $ gi st
+           }
+
+getIncGI :: State TState GI -- get then increase 
+getIncGI = do { st <- get
+              ; let i = gi st
+              ; put st{gi=(i+1)}
+              ; return i
+              }
+
+getAnchorStart :: State TState Bool
+getAnchorStart = do { st <- get
+                    ; return (anchorStart st)
+                    }
+
+setAnchorStart :: State TState ()
+setAnchorStart = do { st <- get
+                    ; put st{anchorStart=True}
+                    }
+
+getAnchorEnd :: State TState Bool
+getAnchorEnd  = do { st <- get
+                   ; return (anchorEnd st)
+                   }
+
+setAnchorEnd :: State TState ()
+setAnchorEnd = do { st <- get
+                  ; put st{anchorEnd=True}
+                  }
+
+
+internalize :: EPat -> Re
+internalize epat = case runState (intern epat) initTState of
+  (re, state) -> re -- todo
+  
+
+intern :: EPat -> State Env Re
+intern epat = 
+  | hasGroup epat = p_intern epat
+  | otherwise     = do 
+    { r <- r_intern epat
+    ; return r
+    }
+                    
+p_intern :: EPat -> State Env Re
+p_intern epat =            
+  case epat of
+    { EEmpty -> do
+         { i <- getIncNGI
+         ; return (Eps i) 
+         }
+    ; EGroup e -> do 
+         { i <- getIncGI
+         ; r <- intern e
+         ; return (relabel r i)
+         }
+    ; EGroupNonMarking e -> intern e
+    ; EOr es -> do
+      { i <- getIncNGI
+      ; rs <- mapM intern es
+      ; return (Choice i rs)
+      }
+    ; EConcat es -> do 
+      { rs <- mapM intern es
+      ; case reverse rs of 
+        { (r':rs') -> 
+             foldM (\xs x -> do
+                       { i <- getIncNGI
+                       ; return (Pair i x xs) }) r' rs'
+        ; [] -> error "an empty sequence encountered."
+        }
+      } 
+    ; EOpt e _ -> do
+      { i <- getIncNGI
+      ; j <- getIncNGI
+      ; r <- intern e
+      ; return (Choice i [(Eps j), r])
+      }
+    ; EPlus e _ -> do 
+      { i <- getIncNGI
+      ; j <- getIncNGI
+      ; r <- intern e
+      ; r' <- intern e
+      ; return (Pair i r (Star j r'))
+      }
+    ; EStar e _ -> do 
+      { i <- getIncNGI
+      ; r <- intern e
+      ; return (Star i r)
+      }
+    ; EBound e low (Just high) _ -> do
+      { r <- intern e
+      ; let r1s = take low $ repeat r
+      ; r1s' <- case r1s of 
+        { [] -> do 
+             { i <- getIncNGI
+             ; return (Eps i)
+             }
+        ; (r1':r1s'') -> 
+             foldM (\xs x -> do
+                       { i <- getIncNGI
+                       ; return (Pair i xs x)}) r1' r1s''
+        }
+      ; let r2s = take (high - low) $ repeat (Choice i [r, Eps i])
+      ; case r2s of  
+        { [] -> do 
+             { i <- getIncNGI
+             ; return (Eps i)
+             }
+        ; (r2':r2s'') -> 
+             foldM (\xs x -> do 
+                       { i <- getIncNGI
+                       ; return (Pair i xs x)}) r2' r2s''
+        }
+      ; case (r1,r2) of 
+        { (Eps _, Eps _) -> return r1
+        ; (Eps _, _ ) -> return r2
+        ; (_, Eps _ ) -> return r1
+        ; (_    , _ ) -> do 
+          { i <- getIncNGI
+          ; return (Pair i r1 r2) 
+          }
+        }
+      }
+    ; EBound e low Nothing _ -> do 
+      { r <- intern e
+      ; let r1s = take low $ repeat r
+      ; r1s' <- case r1s of
+        { (r1':r1s'') -> 
+             foldM (\xs x -> do 
+                       { i <- getIncNGI
+                       ; return (Pair i xs x)}) r1' r1s''
+        ; [] -> do 
+          { i <- getIncNGI
+          ; return (Eps i)
+          }
+        } 
+      ; i <- getIncNGI
+      ; j <- getIncNGI
+      ; return (Pair i r1s' (Star j r))
+      }
+    ; ECarat -> do
+      { notFirst <- getAnchorStart
+      ; if notFirst
+        then do 
+          { i <- getIncNGI
+          ; return (Ch i '^')
+          }
+        else do
+          { setAnchorStar
+          ; i <- getIncNGI
+          ; return (Eps i)
+          }
+      }
+    ; EDollar -> do 
+      { f <- getAnchorEnd
+      ; if f 
+        then return ()
+        else setAnchorEnd
+      ; i <- getIncNGI
+      ; return (Eps i)
+      }
+    ; EDot -> do 
+      { i <- getIncNGI
+      ; return (Any i)
+      }
+    ; EAny 
+           
+           
+      
+         
+                    
+                    
+  
