@@ -89,11 +89,14 @@ import Control.Monad.ST
 import Data.STRef
 import Control.Monad
  
+import Control.Monad.State
   
 import Text.Regex.PDeriv.Parse
 -- import qualified Text.Regex.PDeriv.RE as R
 -- import Text.Regex.PDeriv.IntPattern
 import Text.Regex.PDeriv.ExtPattern
+
+
 
 
 {-
@@ -106,7 +109,7 @@ import Control.Monad(liftM, when, guard)
 -}
 
 
-logger mesg =  unsafePerformIO $ print mesg
+logger mesg = unsafePerformIO $ print mesg
 
 {-
  * The problem
@@ -847,13 +850,14 @@ hasStrong renv = let rops = concatMap snd (IM.toList renv)
                  in any isStrong rops
 
 
+{-
 main :: IO ()
 main = do 
   [si] <- getArgs
   let i = read si
   print $ pretty r5        
   print $ pretty $ (refine g5 r5 w) !! i
-
+-}
 
 {-
 New idea: refinement algo takes ureq re pair and the input words returns a set of 
@@ -1070,8 +1074,8 @@ ref urs [] =
                                  ; Just t  -> posEmpty t }) (getLabel r) ]
 ref urs (l:w) = 
     let urs' = concatMap (\ (ur,r,renv) ->  prune3 r $ prune4 $ urePDeriv (ur, r, renv) l) urs 
-        io = logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
-    in  io `seq`  ref urs' w
+        io = logger $ length (l:w) -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
+    in  io `seq` ref urs' w
 
 
 -- a debugging functin
@@ -1273,7 +1277,7 @@ maximal :: RLevel -> RLevel -> RLevel
 maximal Strong _ = Strong
 maximal _ Strong = Strong
 maximal _ _ = Weak
-
+{-
 newtype State s a = State { runState :: (s -> (a,s)) } 
  
 instance Monad (State s) where
@@ -1282,6 +1286,7 @@ instance Monad (State s) where
                                      stb = f a
                                  in (runState stb) s')
 
+-}
 run :: s -> State s a -> (a,s)
 run s sta = (runState sta) s
 
@@ -1292,13 +1297,15 @@ run_ s sta = fst $ run s sta
 data Env = Env { maxId :: Int
                } deriving Show
 
+
+
 setMaxId :: Int -> State Env ()
-setMaxId i = State (\env -> let env' = env{maxId = i}
+setMaxId i = state (\env -> let env' = env{maxId = i}
                             in ((), env'))
 
 
 getMaxId :: State Env Int
-getMaxId = State (\env -> (maxId env,env))
+getMaxId = state (\env -> (maxId env,env)) 
 
 incMaxId :: State Env Int
 incMaxId = do 
@@ -1698,13 +1705,13 @@ reToRe r = error $ "reToRe: unhandle pattern " ++ (show r)
 
 
 parse :: String -> Maybe Re
-parse s = case parseEPat x of 
+parse s = case parseEPat s of 
   { Left error -> Nothing
-  ; Right (epat, estate) -> Right (internalize epat)
+  ; Right (epat, estate) -> Just (rmSingletonChoice $ internalize epat)
   }
           
 
-data TState = TSTate { ngi :: NGI
+data TState = TState { ngi :: NGI
                      , gi :: GI
                      , anchorStart :: Bool
                      , anchorEnd :: Bool
@@ -1768,15 +1775,16 @@ internalize epat = case runState (intern epat) initTState of
   (re, state) -> re -- todo
   
 
-intern :: EPat -> State Env Re
-intern epat = 
+intern :: EPat -> State TState Re
+intern epat = p_intern epat
+{-
   | hasGroup epat = p_intern epat
   | otherwise     = do 
     { r <- r_intern epat
     ; return r
     }
-                    
-p_intern :: EPat -> State Env Re
+-}                    
+p_intern :: EPat -> State TState Re
 p_intern epat =            
   case epat of
     { EEmpty -> do
@@ -1786,7 +1794,7 @@ p_intern epat =
     ; EGroup e -> do 
          { i <- getIncGI
          ; r <- intern e
-         ; return (relabel r i)
+         ; return (relabel i r)
          }
     ; EGroupNonMarking e -> intern e
     ; EOr es -> do
@@ -1835,6 +1843,7 @@ p_intern epat =
                        { i <- getIncNGI
                        ; return (Pair i xs x)}) r1' r1s''
         }
+      ; i <- getIncNGI
       ; let r2s = take (high - low) $ repeat (Choice i [r, Eps i])
       ; case r2s of  
         { [] -> do 
@@ -1881,7 +1890,7 @@ p_intern epat =
           ; return (Ch i '^')
           }
         else do
-          { setAnchorStar
+          { setAnchorStart
           ; i <- getIncNGI
           ; return (Eps i)
           }
@@ -1898,11 +1907,54 @@ p_intern epat =
       { i <- getIncNGI
       ; return (Any i)
       }
-    ; EAny 
-           
+    ; EAny cs -> do 
+      { i <- getIncNGI
+      ; rs <- mapM (\x -> do 
+                       { i <- getIncNGI
+                       ; return (Ch i x) }) cs
+      ; return (Choice i rs)
+      }
+    ; ENoneOf cs -> error "unable to handle NoneOf yet"
+    ; EEscape c -> do 
+      { i <- getIncNGI
+      ; return (Ch i c)
+      }
+    ; EChar c -> do 
+      { i <- getIncNGI
+      ; return (Ch i c)
+      }
+    }
+  
+
+-- ^ relabel and taking the max src loc, this is to assume
+-- either (i < 0  and j < 0)  or (either i > 0 or j > 0)
+relabel :: SrcLoc -> Re -> Re
+relabel i (Eps j) = Eps (max i j)
+relabel i (Ch j c) = Ch (max i j) c
+relabel i (Pair j r1 r2) = Pair (max i j) r1 r2
+relabel i (Choice j rs) = Choice (max i j) rs
+relabel i (Any j) = Any (max i j)
+relabel i (Star j r) = Star (max i j) r
+
+-- remove the singleton choice generated by the parser
+-- 
+rmSingletonChoice :: Re -> Re
+rmSingletonChoice (Choice i [r]) = relabel i (rmSingletonChoice r)
+rmSingletonChoice (Choice i rs)  = Choice i (map rmSingletonChoice rs)
+rmSingletonChoice (Pair i r1 r2) = Pair i (rmSingletonChoice r1) (rmSingletonChoice r2)
+rmSingletonChoice (Star i r) = Star i (rmSingletonChoice r)
+rmSingletonChoice r = r
+      
+      
            
       
          
+test :: UReq -> String -> String -> Maybe String
+test g pat_s word = 
+  case parse pat_s of
+    Nothing -> Nothing
+    Just r  -> Just $ pretty $ (refine g r word) !! 0
+
                     
                     
   
