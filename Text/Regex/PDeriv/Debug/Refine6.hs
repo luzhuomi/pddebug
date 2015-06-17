@@ -74,7 +74,7 @@ The Refinement checking judgement
 -}
 
 
-module Text.Regex.PDeriv.Debug.Refine5 where
+module Text.Regex.PDeriv.Debug.Refine6 where
 
 import System.Environment 
 import qualified Data.Map as M
@@ -1073,7 +1073,7 @@ ref urs [] =
                                  { Nothing -> False
                                  ; Just t  -> posEmpty t }) (getLabel r) ]
 ref urs (l:w) = 
-    let urs' = concatMap (\ (ur,r,renv) ->  prune3 r $ prune4 $ urePDeriv (ur, r, renv) l) urs 
+    let urs' = concatMap (\ (ur,r,renv) ->  prune3 r {- $ prune4 -} $ urePDeriv (ur, r, renv) l) urs 
         io = logger $ length (l:w) -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
     in  io `seq` ref urs' w
 
@@ -1084,7 +1084,7 @@ ref' urs [] = [ (r,renv) | (ureq, r, renv) <- urs ]
 ref' urs (l:w) = let 
                      urs' = concatMap (\ (ur,r,renv) -> 
                                     let urs'' = urePDeriv (ur, r, renv) l
-                                    in  prune3 r $ prune4  $ map (\(ur', r', renv') -> 
+                                    in  prune3 r {- $ prune4 -}  $ map (\(ur', r', renv') -> 
                                                    let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineEnv renv renv')  )
                                                    in  (ur', r',  combineEnv renv renv')) urs'') urs
                  in ref' urs' w
