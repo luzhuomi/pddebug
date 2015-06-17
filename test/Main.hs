@@ -1,4 +1,4 @@
-import Text.Regex.PDeriv.Debug.Refine5
+import Text.Regex.PDeriv.Debug.Refine6
 
 
 g = [(1::Int, Pair 0 (anyNum 90) (Star 0 (anyNum 90)))]

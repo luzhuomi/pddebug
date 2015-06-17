@@ -1073,7 +1073,7 @@ ref urs [] =
                                  { Nothing -> False
                                  ; Just t  -> posEmpty t }) (getLabel r) ]
 ref urs (l:w) = 
-    let urs' = concatMap (\ (ur,r,renv) ->  prune3 r {- $ prune4 -} $ urePDeriv (ur, r, renv) l) urs 
+    let urs' = concatMap (\ (ur,r,renv) ->  prune3 r $ prune5 $ urePDeriv (ur, r, renv) l) urs 
         io = logger $ length (l:w) -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
     in  io `seq` ref urs' w
 
@@ -1084,7 +1084,7 @@ ref' urs [] = [ (r,renv) | (ureq, r, renv) <- urs ]
 ref' urs (l:w) = let 
                      urs' = concatMap (\ (ur,r,renv) -> 
                                     let urs'' = urePDeriv (ur, r, renv) l
-                                    in  prune3 r {- $ prune4 -}  $ map (\(ur', r', renv') -> 
+                                    in  prune3 r {- $ prune5 -} $ map (\(ur', r', renv') -> 
                                                    let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineEnv renv renv')  )
                                                    in  (ur', r',  combineEnv renv renv')) urs'') urs
                  in ref' urs' w
@@ -1171,6 +1171,7 @@ prune3 r (x:xs) | any (\y -> iso r (trd x) (trd y)) xs = prune3 r xs
            | choiceAlts r lx ly = (x == y) && (isoPairs r xs ys)
            | otherwise = False
 
+-- ^ prune by duplicated rop, -- not effective, slower
 
 prune4 :: [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
 prune4 [] = []
@@ -1183,6 +1184,23 @@ hasDupROps renv = let ps = IM.toList renv
                       let rops' = filter (not . isRNoCh) rops 
                       in length (nub rops') /= length rops')  
                      ps
+                     
+-- ^ prune by common partial derivatives (state), choose one local optimal renv                     
+
+prune5 :: [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
+prune5 ures = 
+  let grouped = -- | re -> (ureq, re, renv)
+        foldl (\m (ureq, re, renv) -> 
+                case M.lookup re m of 
+                  { Nothing -> M.insert re (ureq,re,renv) m 
+                  ; Just (_,_,renv') -> case compareREnv renv renv' of
+                    { LT -> M.update (\_ -> Just (ureq,re,renv)) re m 
+                    ; _  -> m 
+                    }
+                  } ) M.empty ures
+  in map snd (M.toList grouped)
+                                           
+                    
 
 -- check whether the two labels are siblings under the choice sub-exp in r
 
