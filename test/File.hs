@@ -1,10 +1,12 @@
 import Text.Regex.PDeriv.Debug.Refine6
 import System.Environment
+import qualified Data.ByteString.Char8 as S
 
-g = [(1::Int, Pair 0 (anyNum 90) (Star 0 (anyNum 90)))]
+
+g = [(1::Int, Pair 0 (Any 90) (Star 0 (Any 90)))]
 
 main :: IO ()
 main = do 
   (filename:args) <- getArgs
-  file <- readFile filename
-  print $ test g ".*<span>([0-9]*)</span>.*" file
+  file <- S.readFile filename
+  print $ test g ".*<h1 class=\"header-gray\">\n([a-zA-Z\n]*)</h1>.*" file

@@ -98,6 +98,9 @@ import Text.Regex.PDeriv.ExtPattern
 
 
 
+import qualified Data.ByteString.Char8 as S
+
+
 
 {-
 import Data.Char
@@ -1047,7 +1050,7 @@ ropSubsume rs1 rs2 = all (\r2 -> r2 `elem` rs1) rs2
 
 -- top level function
 
-refine :: UReq -> Re -> [Char] -> [Re]
+refine :: UReq -> Re -> S.ByteString -> [Re]
 refine ureq r cs = 
   let renvs = nub $ sortBy compareREnv (ref [(ureq, r, IM.empty)] cs)
       io = renvs `seq` logger ("refine "++ (show $ map (\renv -> " | " ++ show renv  ) renvs))
@@ -1060,23 +1063,24 @@ refine ureq r cs =
 -- we also prune away redundant states
 -- 
 
-ref :: [(UReq, Re, REnv)] -> [Char] -> [REnv]
-ref urs [] =
-    let io = logger ("ref [] "++ (show $ map (\(_,r,renv) -> pretty r ++ " | " {- ++ show renv -}) urs))
-    in {- io `seq` -}
-     [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++      
-             [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
-                    | (ureq, r, renv) <- urs
-                    , renv' <- mkFin r
-                    , not (posEmpty {- (renv `apply_` r) -} r)
-                    , any (\i -> case lookupUR i ureq of
-                                 { Nothing -> False
-                                 ; Just t  -> posEmpty t }) (getLabel r) ]
-ref urs (l:w) = 
-    let urs' = concatMap (\ (ur,r,renv) ->  prune3 r $ prune5 $ urePDeriv (ur, r, renv) l) urs 
-        io = logger $ length (l:w) -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
-    in  io `seq` ref urs' w
-
+ref :: [(UReq, Re, REnv)] -> S.ByteString -> [REnv]
+ref urs bs = case S.uncons bs of
+  { Nothing ->
+       let io = logger ("ref [] "++ (show $ map (\(_,r,renv) -> pretty r ++ " | " {- ++ show renv -}) urs))
+       in {- io `seq` -}
+        [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++      
+        [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
+        | (ureq, r, renv) <- urs
+        , renv' <- mkFin r
+        , not (posEmpty {- (renv `apply_` r) -} r)
+        , any (\i -> case lookupUR i ureq of
+                  { Nothing -> False
+                  ; Just t  -> posEmpty t }) (getLabel r) ]
+  ; Just (l,w) ->
+         let urs' =  prune5 $ concatMap (\ (ur,r,renv) ->  prune3 r $ urePDeriv (ur, r, renv) l) urs 
+             io = logger $ S.length bs -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
+         in  {- io `seq` -} urs' `seq` ref urs' w
+  }
 
 -- a debugging functin
 ref' :: [(UReq, Re, REnv)] -> [Char] -> [(Re,REnv)]
@@ -1222,12 +1226,12 @@ urePDeriv (ur, r, psi) l =
       max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
       io = logger ("urePDeriv: " ++  show ur ++ "|" ++ pretty r ++ "|" ++ show l ++ "|" ++  show t)
-  in {- io `seq` -} [ (ur', r''', psi'' `combineEnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
-                            let r'' = r', -- run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
-                            let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
-                            let (r''',psi'') = {- io `seq` -} simpl  r'' psi' ,
-                            not (redundantREnv psi'' r) ] 
-                            -- not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
+  in t `seq` [ (ur', r''', psi'' `combineEnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
+               -- let r'' = r', -- run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
+               -- let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
+               let (r''',psi'') = {- io `seq` -} simpl  r' psi' ,
+               not (redundantREnv psi'' r) ] 
+     -- not (isRedundant psi r psi'' r''' ) ] -- e.g. adding 'a' to (a|b), since there already an 'a' -- can't just check whether r \equiv r''' , because there are RNoCh rops
 
 
 -- check whether REnv is redundant w.r.t to r
@@ -1968,7 +1972,7 @@ rmSingletonChoice r = r
            
       
          
-test :: UReq -> String -> String -> Maybe String
+test :: UReq -> String -> S.ByteString -> Maybe String
 test g pat_s word = 
   case parse pat_s of
     Nothing -> Nothing
