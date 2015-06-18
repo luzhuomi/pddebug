@@ -1077,7 +1077,7 @@ ref urs bs = case S.uncons bs of
                   { Nothing -> False
                   ; Just t  -> posEmpty t }) (getLabel r) ]
   ; Just (l,w) ->
-         let urs' =  prune5 $ concatMap (\ (ur,r,renv) ->  prune3 r $ urePDeriv (ur, r, renv) l) urs 
+         let urs' =  prune5 $ concatMap (\ (ur,r,renv) ->  {- prune3 r $ -} urePDeriv (ur, r, renv) l) urs 
              io = logger $ S.length bs -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
          in  {- io `seq` -} urs' `seq` ref urs' w
   }
