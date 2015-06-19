@@ -28,6 +28,7 @@ library
                          Text.Regex.PDeriv.Debug.Refine4
                          Text.Regex.PDeriv.Debug.Refine5
                          Text.Regex.PDeriv.Debug.Refine6
+                         Text.Regex.PDeriv.Debug.Refine7
   Buildable:              True
   Extensions:             GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
   GHC-Options:            -threaded -funbox-strict-fields
