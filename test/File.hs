@@ -1,4 +1,4 @@
-import Text.Regex.PDeriv.Debug.Refine6
+import Text.Regex.PDeriv.Debug.Refine8
 import System.Environment
 import qualified Data.ByteString.Char8 as S
 

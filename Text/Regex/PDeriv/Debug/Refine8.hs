@@ -1,7 +1,8 @@
 {-# LANGUAGE GADTs #-}
 
 {-
-optimized from Refine5, added prune5, i.e. local optimization by pruning away common partial dervatives/states
+
+Based on Refine6, optimized,
 
 The regular expression refinement algorithm
 
@@ -76,7 +77,7 @@ The Refinement checking judgement
 -}
 
 
-module Text.Regex.PDeriv.Debug.Refine6 where
+module Text.Regex.PDeriv.Debug.Refine8 where
 
 import System.Environment 
 import qualified Data.Map as M
@@ -85,7 +86,7 @@ import System.IO.Unsafe
 import Data.List 
 import Data.Maybe
 import Data.Char
-
+import qualified Data.Set as Set
 
 import Control.Monad.ST
 import Data.STRef
@@ -101,17 +102,6 @@ import Text.Regex.PDeriv.ExtPattern
 
 
 import qualified Data.ByteString.Char8 as S
-
-
-
-{-
-import Data.Char
-import Text.ParserCombinators.Parsec((<|>), (<?>),
-                                     unexpected, try, runParser, many, getState, setState, CharParser, ParseError,
-                                     sepBy1, option, notFollowedBy, many1, lookAhead, eof, between,
-                                     string, oneOf, noneOf, digit, char, anyChar)
-import Control.Monad(liftM, when, guard)
--}
 
 
 logger mesg = unsafePerformIO $ print mesg
@@ -156,25 +146,51 @@ r ::= () || (p|p) || pp || p* || l || \phi
 -}
                           
 data Re where
- Choice :: SrcLoc -> [Re] -> Re
- Pair :: SrcLoc -> Re -> Re -> Re
- Star :: SrcLoc -> Re -> Re
- Ch :: SrcLoc -> Char -> Re
- Eps :: SrcLoc -> Re
- Phi :: Re
- Any :: SrcLoc -> Re
- deriving (Show, Ord)
+  Choice :: SrcLoc -> [Re] -> Re
+  Pair :: SrcLoc -> Re -> Re -> Re
+  Star :: SrcLoc -> Re -> Re
+  Ch :: SrcLoc -> Char -> Re
+  Eps :: SrcLoc -> Re
+  Phi :: Re
+  Any :: SrcLoc -> Re
+ deriving (Show)
 
+
+instance Ord Re where
+  compare Phi Phi = EQ
+  compare Phi _ = LT
+  compare _ Phi = GT
+  compare (Eps _) (Eps _) = EQ
+  compare (Eps _) _ = LT
+  compare _ (Eps _) = GT
+  compare (Any _) (Any _) = EQ
+  compare (Any _) _ = LT
+  compare _ (Any _) = GT
+  compare (Ch _ x) (Ch _ y) = compare x y
+  compare (Ch _ _) _ = LT
+  compare _ (Ch _ _) = GT
+  compare (Pair _ r1 r2) (Pair _ r3 r4) = case compare r1 r3 of
+    { EQ -> compare r2 r4
+    ; otherwise -> otherwise 
+    }
+  compare (Pair _ _ _) _ = LT
+  compare _ (Pair _ _ _) = GT
+  compare (Choice _ rs) (Choice _ rs') = compare rs rs'
+  compare (Choice _ _) _ = LT
+  compare _ (Choice _ _) = GT
+  compare (Star _ r) (Star _ r') = compare r r'
+
+  
 
 instance Eq Re where
-    (==) (Choice _ rs1) (Choice _ rs2) = rs1 == rs2
-    (==) (Pair _ r1 r2) (Pair _ r1' r2') = r1 == r1' && r2 == r2'
-    (==) (Star _ r1) (Star _ r2) = r1 == r2
-    (==) (Ch _ c1) (Ch _ c2) = c1 == c2
-    (==) Eps{} Eps{} = True
-    (==) Phi Phi = True
-    (==) (Any _) (Any _) = True
-    (==) _ _ = False
+  (==) (Choice _ rs1) (Choice _ rs2) = rs1 == rs2
+  (==) (Pair _ r1 r2) (Pair _ r1' r2') = r1 == r1' && r2 == r2'
+  (==) (Star _ r1) (Star _ r2) = r1 == r2
+  (==) (Ch _ c1) (Ch _ c2) = c1 == c2
+  (==) Eps{} Eps{} = True
+  (==) Phi Phi = True
+  (==) (Any _) (Any _) = True
+  (==) _ _ = False
 
 pretty :: Re -> String
 pretty (Choice _ rs) = "(" ++ interleave "|" (map pretty rs) ++ ")"
@@ -286,18 +302,6 @@ simpl (Star l r) renv
   | isPhi r   = (Eps l, renv)
   | otherwise = let (r',e) = simpl r renv in (Star l r',e)
 simpl x e = (x,e)
-
--- reloc : relocate rop under l' to l in a renv
-
-reloc :: Int -> Int -> REnv -> REnv
-reloc l' l renv  =
-  case IM.lookup l' renv of
-    { Just rops' -> IM.delete l' $ case IM.lookup l renv of 
-         { Nothing -> IM.insert l rops' renv
-         ; Just rops -> IM.update (\_ -> Just (rops++rops')) l renv
-         }
-    ; Nothing    -> renv
-    }
 
 -- simplication w/o changing the REnv
 {-
@@ -850,10 +854,11 @@ r7 = Pair (-10)
 g7 = [(3::Int, r1)]
 
 
+{-
 hasStrong :: REnv -> Bool
 hasStrong renv = let rops = concatMap snd (IM.toList renv)
                  in any isStrong rops
-
+-}
 
 {-
 main :: IO ()
@@ -884,13 +889,142 @@ New idea: refinement algo takes ureq re pair and the input words returns a set o
 Note that from (Ind) the refinement environment \Psi is passed along
 -}
 
-type REnv = IM.IntMap [ROp]
+data REnv = REnv { ops :: IM.IntMap RS
+                 , countMkFin :: Int
+                 , countStrongATr :: Int
+                 , countStrongASt :: Int
+                 , countStrongNoCh :: Int                   
+                 , countWeakATr :: Int
+                 , countWeakASt :: Int
+                 , countWeakNoCh :: Int                   
+                 } 
+          deriving (Show, Eq, Ord)
+            
+data RS = RS { atrs :: Set.Set ROp
+             , asts :: [ROp]
+             , mkfin :: Int -- mkfin is always weak?!
+             , strong_atrs :: Int
+             , strong_asts :: Int
+             , strong_noch :: Int
+             , weak_atrs :: Int
+             , weak_asts :: Int
+             , weak_noch :: Int
+             } 
+        deriving (Show, Eq, Ord)
+
+                 
+          
+emptyRS = RS Set.empty [] 0 0 0 0 0 0 0
+
+emptyREnv = REnv IM.empty 0 0 0 0 0 0 0
+
+
+singletonRS :: ROp -> RS
+singletonRS rop@(RATr r Strong) = RS (Set.singleton rop) [] 0 1 0 0 0 0 0
+singletonRS rop@(RATr r Weak) = RS (Set.singleton rop) []   0 0 0 0 1 0 0
+singletonRS rop@(RASt r Strong) = RS Set.empty [rop]        0 0 1 0 0 0 0
+singletonRS rop@(RASt r Weak) = RS Set.empty [rop]          0 0 0 0 0 1 0
+singletonRS rop@(RMkFin _ ) = RS Set.empty []               1 0 0 0 0 0 0
+singletonRS rop@(RNoCh Strong) = RS Set.empty []            0 0 0 1 0 0 0
+singletonRS rop@(RNoCh Weak) = RS Set.empty []              0 0 0 0 0 0 1
+
+
+lookupREnv :: SrcLoc -> REnv -> Maybe RS
+lookupREnv i renv = IM.lookup i (ops renv)
+                    
+
+
+
+deleteREnv :: SrcLoc -> REnv -> REnv
+deleteREnv i renv =               
+  case IM.lookup i (ops renv) of
+    { Nothing -> renv
+    ; Just rs -> let ops'            = IM.delete i (ops renv) 
+                     countMkFin'     = countMkFin renv - mkfin rs
+                     countStrongATr' = countStrongATr renv - strong_atrs rs
+                     countStrongASt' = countStrongASt renv - strong_asts rs
+                     countStrongNoCh' = countStrongNoCh renv - strong_noch rs
+                     countWeakATr'   = countWeakATr renv - weak_atrs rs 
+                     countWeakASt'   = countWeakASt renv - weak_asts rs
+                     countWeakNoCh'  = countWeakNoCh renv - weak_noch rs
+                 in REnv ops'  countMkFin' countStrongATr' countStrongASt' countStrongNoCh' countWeakATr' countWeakASt' countWeakNoCh'
+    }
+  
+  
+singletonREnv :: SrcLoc -> RS -> REnv
+singletonREnv l rs = 
+  REnv (IM.singleton l rs)  (mkfin rs) (strong_atrs rs) (strong_asts rs) (strong_noch rs) (weak_atrs rs) (weak_asts rs) (weak_noch rs)
+
+-- reloc : relocate rop under l' to l in a renv
+
+reloc :: SrcLoc -> SrcLoc -> REnv -> REnv
+reloc l' l renv  =
+  let ops_ = ops renv
+  in case IM.lookup l' ops_ of
+    { Just rs' -> 
+         let renv1 = deleteREnv l' renv
+             renv2 = singletonREnv l rs' 
+         in combineREnv renv1 renv2
+    ; Nothing  -> renv
+    }
+              
+  
+combineRS :: RS -> RS -> RS
+combineRS rs1 rs2 = 
+  let atrs' = ((atrs rs1) `Set.union` (atrs rs2)) 
+      asts' = (asts rs1) ++ (asts rs2)
+      mkfin' = mkfin rs1 + mkfin rs2
+      (s_atrs',w_atrs') = Set.partition isStrong atrs'
+      strong_atrs' = Set.size s_atrs'
+      strong_asts' = strong_asts rs1 + strong_asts rs2
+      weak_atrs'   = Set.size w_atrs'
+      weak_asts'   = weak_asts rs1  + weak_asts rs2
+      strong_noch' = strong_noch rs1 + strong_noch rs2 + (strong_atrs rs1 + strong_atrs rs2 - strong_atrs')
+      weak_noch'   = weak_noch rs1 + weak_noch rs2 + (weak_atrs rs1 + weak_atrs rs2 - weak_atrs')
+  in RS  atrs' asts' mkfin' strong_atrs'  strong_asts' strong_noch' weak_atrs' weak_asts' weak_noch' 
+  
+
+-- combine two REnv
+combineREnv :: REnv -> REnv -> REnv 
+combineREnv renv1 renv2 = 
+  let ops_ = IM.unionWith (\x y -> (x `combineRS` y)) (ops renv1) (ops renv2) 
+      (countStrongATr_, countWeakATr_, countStrongNoCh_, countWeakNoCh_) = 
+        foldl (\swnn krs -> 
+                let (_, rs) = krs
+                    (s,w,sn, wn) = swnn
+                in (s + strong_atrs rs, w + weak_atrs rs, sn + strong_noch rs, wn + weak_noch rs)) (0,0,0,0) (IM.toList ops_)
+      countStrongASt_ = countStrongASt renv1 + countStrongASt renv2
+      countMkFin_ = countMkFin renv1 + countMkFin renv2
+      countWeakASt_ = countWeakASt renv1 + countWeakASt renv2
+  in REnv ops_  countMkFin_ countStrongATr_ countStrongASt_  countStrongNoCh_ countWeakATr_ countWeakASt_ countWeakNoCh_
+                          
+  
+  
 
 data ROp = RATr Re RLevel  -- add transition
          | RASt Re RLevel  -- add state
          | RMkFin RLevel    -- make final
          | RNoCh RLevel     -- no change
-          deriving (Eq,Show)
+          deriving (Show)
+                   
+instance Eq ROp where                   
+  (==) (RATr r1 l1) (RATr r2 l2) = r1 == r2 && l1 == l2
+  (==) (RASt r1 l1) (RASt r2 l2) = r1 == r2 && l1 == l2
+  (==) (RMkFin l1) (RMkFin l2) = l1 == l2
+  (==) (RNoCh l1) (RNoCh l2) = l1 == l2
+  (==) _ _ = False
+  
+instance Ord ROp where  
+  compare (RATr r1 l1) (RATr r2 l2) = compare r1 r2
+  compare (RATr _ _) _ = LT
+  compare _ (RATr _ _) = GT
+  compare (RASt r1 l1) (RASt r2 l2) = compare r1 r2
+  compare (RASt _ _) _ = LT
+  compare _ (RASt _ _) = GT
+  compare (RMkFin l1) (RMkFin l2) = compare l1 l2
+  compare (RMkFin _) _ = LT
+  compare _ (RMkFin _) = GT
+  compare (RNoCh l1) (RNoCh l2) = compare l1 l2
 
 reInROp :: ROp -> Maybe Re
 reInROp (RATr r _) = Just r
@@ -908,7 +1042,10 @@ resInROps ((RMkFin  _):rops) = resInROps rops
 
 resInREnv :: REnv -> [Re]
 resInREnv renv = 
-  resInROps $ concat $ map snd (IM.toList renv)
+  let rss = map snd (IM.toList (ops renv))
+      atrss = concatMap (Set.toList . atrs) rss
+      astss = concatMap asts rss
+  in resInROps (atrss ++ astss) 
 
         
 
@@ -917,43 +1054,46 @@ compareREnv :: REnv -> REnv -> Ordering
 compareREnv r2 r1 = 
   let c1   = renvSize r1
       c2   = renvSize r2
+      sNc1 = countStrongNoCh r1
+      sNc2 = countStrongNoCh r2
       sTr1 = countStrongATr r1  
       sTr2 = countStrongATr r2
       sSt1 = countStrongASt r1
       sSt2 = countStrongASt r2
-      sNC1 = countStrongNoCh r1
-      sNC2 = countStrongNoCh r2
-      sMF1 = countStrongMkFin r1
-      sMF2 = countStrongMkFin r2
-
+      sMF1 = countMkFin r1
+      sMF2 = countMkFin r2
+      wNc1 = countWeakNoCh r1
+      wNc2 = countWeakNoCh r2
       wTr1 = countWeakATr r1  
       wTr2 = countWeakATr r2
       wSt1 = countWeakASt r1
       wSt2 = countWeakASt r2
-      wNC1 = countWeakNoCh r1
-      wNC2 = countWeakNoCh r2
-      wMF1 = countWeakMkFin r1
-      wMF2 = countWeakMkFin r2
 
   in case compare c2 c1 of
-    { EQ -> case compare sNC1 sNC2 of 
-         { EQ -> case compare sMF1 sMF2 of
-              { EQ -> case compare sTr1 sTr2 of
-                   { EQ -> case compare sSt1 sSt2 of
-                        { EQ -> case compare wNC1 wNC2 of
-                             { EQ -> case compare wMF1 wMF2 of
-                                  { EQ -> compare wTr1 wTr2   
+    { EQ -> case compare sNc1 sNc2 of
+         { EQ -> case compare sTr1 sTr2 of
+              { EQ -> case compare sSt1 sSt2 of
+                   { EQ -> case compare sMF1 sMF2 of
+                        { EQ -> case compare wNc1 wNc2 of 
+                             { EQ -> case compare wTr1 wTr2 of
+                                  { EQ -> compare wSt1 wSt2 
                                   ; others -> others }
-                             ; others -> others }  
+                             ; others -> others }
                         ; others -> others }
-                   ; others -> others }
-              ; others  -> others }
+                   ; others -> others }  
+              ; others -> others }
          ; others -> others }
     ; others -> others }
+     
 
 
 -- count the number of ROps in renv
 
+
+renvSize :: REnv -> Int
+renvSize renv = (countStrongNoCh renv + countWeakNoCh renv + countStrongATr renv + countStrongASt renv + countMkFin renv + countWeakATr renv + countWeakASt renv)
+
+{-
 renvSize :: REnv -> Int
 renvSize renv = sum (map (\ (k,v) -> length v) (IM.toList renv))
 
@@ -991,7 +1131,7 @@ countWeakNoCh renv = sum (map (\ (k,v) -> length (filter (\x -> (isWeak x) && (i
 
 countWeakMkFin :: REnv -> Int 
 countWeakMkFin renv = sum (map (\ (k,v) -> length (filter (\x -> (isWeak x) && (isMkFin x)) v)) (IM.toList renv))
-                         
+-}                         
                          
 isStrong :: ROp -> Bool
 isStrong (RATr _ Strong) = True                         
@@ -1039,6 +1179,10 @@ renv_1 \entails renv_2 iff
  note the equality among ROp we ignore the loc of the Re
 -}
 
+
+
+{- TODO fix me later, we might need entailment relation again. 
+
 entail :: REnv -> REnv -> Bool 
 entail r1 r2 = 
   let ks = IM.keys r2
@@ -1048,13 +1192,13 @@ entail r1 r2 =
 
 ropSubsume :: [ROp] -> [ROp] -> Bool
 ropSubsume rs1 rs2 = all (\r2 -> r2 `elem` rs1) rs2
-
+-}
 
 -- top level function
 
 refine :: UReq -> Re -> S.ByteString -> [Re]
 refine ureq r cs = 
-  let renvs = nub $ sortBy compareREnv (ref [(ureq, r, IM.empty)] cs)
+  let renvs = nub $ sortBy compareREnv (ref [(ureq, r, emptyREnv)] cs)
       io = renvs `seq` logger ("refine "++ (show $ map (\renv -> " | " ++ show renv  ) renvs))
   in {- io `seq` -} 
      map (\renv ->  apply_ renv r)  renvs
@@ -1071,7 +1215,7 @@ ref urs bs = case S.uncons bs of
        let io = logger ("ref [] "++ (show $ map (\(_,r,renv) -> pretty r ++ " | " {- ++ show renv -}) urs))
        in {- io `seq` -}
         [ renv | (ureq, r, renv) <- urs, posEmpty {- (renv `apply_` r)-}  r ] ++      
-        [ renv' `combineEnv` renv   -- try to fix those states which are non-final?
+        [ renv' `combineREnv` renv   -- try to fix those states which are non-final?
         | (ureq, r, renv) <- urs
         , renv' <- mkFin r
         , not (posEmpty {- (renv `apply_` r) -} r)
@@ -1090,9 +1234,9 @@ ref' urs [] = [ (r,renv) | (ureq, r, renv) <- urs ]
 ref' urs (l:w) = let 
                      urs' = concatMap (\ (ur,r,renv) -> 
                                     let urs'' = urePDeriv (ur, r, renv) l
-                                    in  prune3 r {- $ prune5 -} $ map (\(ur', r', renv') -> 
-                                                   let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineEnv renv renv')  )
-                                                   in  (ur', r',  combineEnv renv renv')) urs'') urs
+                                    in  {- prune3 r  $ -} prune5  $ map (\(ur', r', renv') -> 
+                                                   let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineREnv renv renv')  )
+                                                   in  (ur', r',  combineREnv renv renv')) urs'') urs
                  in ref' urs' w
 {-
 pruning by checking for entailment among REnvs, looking for local optimal
@@ -1115,6 +1259,7 @@ however, with this pruning scheme, rops_2 is pruned at the 2nd D input character
 as rops_1 = [(0, ATr D) ]  is entailed by rops_2 = [(0, ATr D), (1, ATr D)] 
 -}
 
+{-
 prune :: [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
 prune ts = let sts = sortBy (\(_,_,r1) (_,_,r2) -> compare (renvSize r2) (renvSize r1)) ts
            in prune' sts
@@ -1124,7 +1269,7 @@ prune' :: [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
 prune' [] = []
 prune' (x:xs) | any (\y -> (trd x) `entail` (trd y)) xs = prune' xs
               | otherwise = (x:(prune' xs))
-
+-}
 trd :: (a,b,c) -> c
 trd (_,_,x) = x
 
@@ -1158,7 +1303,7 @@ e.g. r = (Choice [1] (Ch [2] 'A') (Ch [3] 'B'))
 
 
 -- Rationale: applying the above two operations lead to the semantically equivalent regex
-
+{- TODO: fixme later
 prune3 :: Re -> [(UReq, Re, REnv)] -> [(UReq, Re, REnv)]
 prune3 r [] = [] 
 prune3 r (x:xs) | any (\y -> iso r (trd x) (trd y)) xs = prune3 r xs
@@ -1190,6 +1335,7 @@ hasDupROps renv = let ps = IM.toList renv
                       let rops' = filter (not . isRNoCh) rops 
                       in length (nub rops') /= length rops')  
                      ps
+-}
                      
 -- ^ prune by common partial derivatives (state), choose one local optimal renv                     
 
@@ -1228,7 +1374,7 @@ urePDeriv (ur, r, psi) l =
       max_i = maximum $ (getLabels r) ++ (concatMap getLabels $ resInREnv psi)
       (t,e) = run (Env max_i) (urPDeriv (ur, r) l Weak)
       io = logger ("urePDeriv: " ++  show ur ++ "|" ++ pretty r ++ "|" ++ show l ++ "|" ++  show t)
-  in t `seq` [ (ur', r''', psi'' `combineEnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
+  in t `seq` [ (ur', r''', psi'' `combineREnv` psi) | (ur', r', psi') <- t,  -- let r''' = r', let psi'' = psi' ] 
                -- let r'' = r', -- run_ e (psi' `apply` r'),  -- we can only apply simplification after we apply psi' to r' 
                -- let io = logger ("simpl " ++ show r'' ++ " with " ++ show psi'),
                let (r''',psi'') = {- io `seq` -} simpl  r' psi' ,
@@ -1239,17 +1385,11 @@ urePDeriv (ur, r, psi) l =
 -- check whether REnv is redundant w.r.t to r
 redundantREnv :: REnv -> Re -> Bool
 redundantREnv renv r = 
-  let srcAndOps = IM.toList renv
+  let srcAndOps = IM.toList (ops renv)
   in any (\(src,ops) -> redundantOps src ops r) srcAndOps
-     where redundantOps :: SrcLoc -> [ROp] -> Re -> Bool
-           redundantOps i ops r = 
-             let (aTrOps, aStOps, isMadeFin) = 
-                   foldl (\(ts,ss,es) op -> case op of 
-                             { (RATr _ _)  -> (ts++[op], ss, es)
-                             ; (RASt _ _)  -> (ts, ss ++ [op], es)
-                             ; (RMkFin  _) -> (ts, ss, True)
-                             ; _           -> (ts, ss, es)
-                             } ) ([],[],False) ops     
+     where redundantOps :: SrcLoc -> RS -> Re -> Bool
+           redundantOps i rs r = 
+             let aTrOps = Set.toList (atrs rs)
              in any (\aTrOp -> redundantRATr i aTrOp r) aTrOps
                 -- check whether (i, {RATr l}) is redundant
                 -- since i is a leaf node in r
@@ -1347,42 +1487,42 @@ urPDeriv (ur, Eps i) l rlvl
   | i `inUR` ur = do 
      { next_i <- incMaxId
        -- let next_i  = i  
-     ; return [ ((updateUR i r' ur), Eps next_i, IM.singleton i [RASt (Ch next_i l) Strong]) 
+     ; return [ ((updateUR i r' ur), Eps next_i, singletonREnv i (singletonRS (RASt (Ch next_i l) Strong))) 
               | let r = fromJust (lookupUR i ur), r' <- pderiv r l ] 
      }
   | otherwise   = do 
      { next_i <- incMaxId 
        -- let next_i  = i    
-     ; return [ (ur, Eps next_i, IM.singleton i [RASt (Ch next_i l) (maximal rlvl Weak)]) ]
+     ; return [ (ur, Eps next_i, singletonREnv i (singletonRS (RASt (Ch next_i l) (maximal rlvl Weak)))) ]
      }
 urPDeriv (ur, (Ch i l)) l' rlvl = 
   case lookup i ur of 
     { Just r | l == l' -> do 
       { -- next_i <- incMaxId
-      ; return  [ ((updateUR i r' ur), (Eps i), IM.singleton i [RNoCh Strong] )
-                         | r' <- pderiv r l ]
+      ; return  [ ((updateUR i r' ur), (Eps i), singletonREnv i (singletonRS (RNoCh Strong) ))
+                | r' <- pderiv r l ]
       }
              | l /= l' -> do 
       { -- next_i <- incMaxId
       ; next_i2 <- incMaxId
-      ; return  [ ((updateUR i r' ur), (Eps i), IM.singleton i [RATr (Ch next_i2 l') Strong]) | r' <- pderiv r l]
+      ; return  [ ((updateUR i r' ur), (Eps i), singletonREnv i (singletonRS (RATr (Ch next_i2 l') Strong))) | r' <- pderiv r l]
       }
     ; Nothing | l == l' -> do 
       { -- next_i <- incMaxId  
-      ; return [ (ur, Eps i, IM.singleton i [RNoCh (maximal rlvl Weak)] ) ]
+      ; return [ (ur, Eps i, singletonREnv i (singletonRS $ RNoCh (maximal rlvl Weak)) ) ]
       }
               | l /= l' -> do 
       { -- next_i <- incMaxId
       ; next_i2 <- incMaxId
-      ; return [ (ur, Eps i, IM.singleton i [RATr (Ch next_i2 l') (maximal rlvl Weak)] ) ] 
+      ; return [ (ur, Eps i, singletonREnv i (singletonRS $ RATr (Ch next_i2 l') (maximal rlvl Weak)) ) ] 
       }
     }
 
 urPDeriv (ur, (Any i)) l rlvl =   
   case lookup i ur of 
     { Just r -> 
-         return [ ((updateUR i r' ur), (Eps i), IM.singleton i [RNoCh Strong] ) | r' <- pderiv r l ]
-    ; Nothing -> return [ (ur, Eps i, IM.singleton i [RNoCh (maximal rlvl Weak)] ) ]
+         return [ ((updateUR i r' ur), (Eps i), singletonREnv i (singletonRS $ RNoCh Strong) ) | r' <- pderiv r l ]
+    ; Nothing -> return [ (ur, Eps i, singletonREnv i (singletonRS $ RNoCh (maximal rlvl Weak)) ) ]
     }
   
 urPDeriv (ur, Pair i r1 r2) l rlvl =
@@ -1400,7 +1540,7 @@ urPDeriv (ur, Pair i r1 r2) l rlvl =
               { let ur2 =  ur `limit` fv r2 
               ; t1 <- urPDeriv (ur `limit` (fv r1), r1) l Strong 
               ; t2 <- urPDeriv (ur2, r2) l Strong
-              ; return $ [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair i r1' r2), renv) |  (ur', r1', renv) <- t1] ++ [ (ur', r2', renv `combineEnv` renv') | (ur', r2', renv) <- t2, renv' <- mkFin r1 ]
+              ; return $ [ ((ur' ++ ur2 ++ [(i, Choice dontcare ps)]) , (Pair i r1' r2), renv) |  (ur', r1', renv) <- t1] ++ [ (ur', r2', renv `combineREnv` renv') | (ur', r2', renv) <- t2, renv' <- mkFin r1 ]
               }
           }
     ; Nothing | posEmpty r1 -> do 
@@ -1413,7 +1553,7 @@ urPDeriv (ur, Pair i r1 r2) l rlvl =
           { let ur2 =  ur `limit` fv r2
           ; t1 <- urPDeriv (ur `limit` (fv r1), r1) l rlvl
           ; t2 <- urPDeriv (ur2, r2) l rlvl 
-          ; return $ [ ((ur' ++ ur `limit` (fv r2)) , (Pair i r1' r2), renv) |  (ur', r1', renv) <- t1 ] ++ [ (ur', r2', renv `combineEnv` renv') | (ur', r2', renv) <- t2, renv' <- mkFin r1 ]
+          ; return $ [ ((ur' ++ ur `limit` (fv r2)) , (Pair i r1' r2), renv) |  (ur', r1', renv) <- t1 ] ++ [ (ur', r2', renv `combineREnv` renv') | (ur', r2', renv) <- t2, renv' <- mkFin r1 ]
           }
     }
 urPDeriv (ur, Choice i rs) l rlvl = 
@@ -1455,12 +1595,12 @@ urPDeriv ur c rlvl  = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c
 
 -- make a non empty regex to accepts epsilon, structurally --todo shall we consider the ureq?
 mkFin :: Re -> [REnv]
-mkFin (Eps i)        = [IM.empty]
-mkFin (Ch i _)       = [IM.singleton i [RMkFin Weak]]
-mkFin (Any i)        = [IM.singleton i [RMkFin Weak]]
-mkFin (Pair i r1 r2) = [ renv1 `combineEnv` renv2 | renv1 <- mkFin r1, renv2 <- mkFin r2 ]
+mkFin (Eps i)        = [emptyREnv]
+mkFin (Ch i _)       = [singletonREnv i (singletonRS $ RMkFin Weak)]
+mkFin (Any i)        = [singletonREnv i (singletonRS $ RMkFin Weak)]
+mkFin (Pair i r1 r2) = [ renv1 `combineREnv` renv2 | renv1 <- mkFin r1, renv2 <- mkFin r2 ]
 mkFin (Choice i rs)  = mkFin r1 ++ mkFin r2
-mkFin (Star i r)     = [IM.empty] 
+mkFin (Star i r)     = [emptyREnv] 
 mkFin _              = []
 
 
@@ -1487,7 +1627,7 @@ limit ur is = filter (\(i,_) -> i `elem` is) ur
 
 
 apply_ :: REnv -> Re -> Re 
-apply_ renv r = let is = concatMap getLabels $ resInROps (concatMap snd (IM.toList renv)) 
+apply_ renv r = let is = concatMap getLabels (resInREnv renv)
                     max_i = maximum $ (getLabels r) ++ is
                     io = logger "apply_ \n ============================================================================\n ============================================================================\n ============================================================================\n ============================================================================"
                 in {- io `seq` -} run_ (Env max_i) (apply renv r)
@@ -1503,14 +1643,11 @@ apply renv r =
       -- more thoughts, maybe we shall split the simp into choice simplification and others non-choice simplification, because choice simplification is the only one that change the REnv.        
   in case s of
     { (Eps i) -> 
-         case IM.lookup i renv' of 
-           { Just ops -> do 
-                { let (trans, states, eps) = 
-                        foldl (\(ts,ss,es) op -> case op of 
-                                  { (RATr t _)  -> (ts++[t], ss, es)
-                                  ; (RASt t _)  -> (ts, ss ++ [t], es)
-                                  ; (RMkFin  _) -> (ts, ss, True)
-                                  } ) ([],[],False) ops
+         case lookupREnv i renv' of 
+           { Just rs -> do 
+                { let trans = map (\(RATr t _) -> t) (Set.toList (atrs rs))
+                      states = map (\(RASt t _) -> t) (asts rs)
+                      eps  = if (mkfin rs) > 0 then True else False
                 -- create a sequence concatenation out of the add-states ops
                 ; ss' <- mkSeqS =<< mapM (apply renv') states
                 -- create a choice out of the add transitions ops
@@ -1526,15 +1663,11 @@ apply renv r =
            ; Nothing -> return s        
            }
     ; (Ch i c) ->
-           case IM.lookup i renv' of 
-             { Just ops -> do 
-                  { let (trans, states, eps) = 
-                          foldl (\(ts,ss,es) op -> case op of 
-                                    { (RATr t _)  -> (ts++[t], ss, es)
-                                    ; (RASt t _)  -> (ts, ss ++ [t], es)
-                                    ; (RMkFin  _) -> (ts, ss, True)
-                                    ; _           -> (ts, ss, es)
-                                    } ) ([],[],False) ops
+           case lookupREnv i renv' of 
+             { Just rs -> do 
+                  { let trans = map (\(RATr t _) -> t) (Set.toList (atrs rs))
+                        states = map (\(RASt t _) -> t) (asts rs)
+                        eps  = if (mkfin rs) > 0 then True else False
                         -- create a sequence concatenation out of the add-states ops 
                   ; ss' <- mkSeqS =<< mapM (apply renv') states
                            -- append ss' to s
@@ -1564,15 +1697,11 @@ apply renv r =
              ; Nothing -> return s        
              }
     ; (Any i) -> 
-             case IM.lookup i renv' of 
-               { Just ops -> do
-                    { let (trans, states, eps) = 
-                            foldl (\(ts,ss,es) op -> case op of 
-                                      { (RATr t _)  -> (ts++[t], ss, es)
-                                      ; (RASt t _)  -> (ts, ss ++ [t], es)
-                                      ; (RMkFin  _) -> (ts, ss, True)
-                                      ; _           -> (ts,ss,es)
-                                      } ) ([],[],False) ops
+             case lookupREnv i renv' of 
+               { Just rs -> do 
+                    { let trans = map (\(RATr t _) -> t) (Set.toList (atrs rs))
+                          states = map (\(RASt t _) -> t) (asts rs)
+                          eps  = if (mkfin rs) > 0 then True else False
                     ; ss' <- mkSeqS =<< mapM (apply renv') states
                              -- append ss' to s
                     ; ss'' <- mkSeqS [s, ss']
@@ -1676,9 +1805,8 @@ app r (t:ts) = let is = getLabel r
                in app (Pair is r (annotate is t)) ts
 -}
 
-combineEnv :: REnv -> REnv -> REnv 
-combineEnv renv1 renv2 = IM.unionWith (\x y -> (x ++ y)) renv1 renv2 -- don't nub here.
 
+{- not needed
 extend :: REnv -> [Int] -> ROp -> REnv
 extend renv [] _ = renv
 extend renv (i:_) e@(RATr r lvl) = -- we only care about the original label
@@ -1687,7 +1815,7 @@ extend renv (i:_) e@(RATr r lvl) = -- we only care about the original label
                 | otherwise -> renv
       ; Nothing -> IM.insert i [RATr r lvl] renv
       }
-
+-}
 
 
 showL :: Show a => [a] -> IO ()
