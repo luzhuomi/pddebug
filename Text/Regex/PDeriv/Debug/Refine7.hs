@@ -1,6 +1,8 @@
 {-# LANGUAGE GADTs #-}
 
 {-
+Based on Refine6, optimized, but compareREnv is buggy, apply_ seems to have bug too.
+
 The regular expression refinement algorithm
 
 Inspired by the type checking system and type inference algorithm found in programming language research communities. \cite{TODO}
@@ -1001,25 +1003,28 @@ compareREnv :: REnv -> REnv -> Ordering
 compareREnv r2 r1 = 
   let c1   = renvSize r1
       c2   = renvSize r2
+      nc1 = countNoCh r1
+      nc2 = countNoCh r2
       sTr1 = countStrongATr r1  
       sTr2 = countStrongATr r2
       sSt1 = countStrongASt r1
       sSt2 = countStrongASt r2
       sMF1 = countMkFin r1
       sMF2 = countMkFin r2
-
       wTr1 = countWeakATr r1  
       wTr2 = countWeakATr r2
       wSt1 = countWeakASt r1
       wSt2 = countWeakASt r2
 
   in case compare c2 c1 of
-    { EQ -> case compare sTr1 sTr2 of
-         { EQ -> case compare sSt1 sSt2 of
-              { EQ -> case compare sMF1 sMF2 of
-                   { EQ -> compare wTr1 wTr2   
-                   ; others -> others }
-              ; others -> others }  
+    { EQ -> case compare nc1 nc2 of
+         { EQ -> case compare sTr1 sTr2 of
+              { EQ -> case compare sSt1 sSt2 of
+                   { EQ -> case compare sMF1 sMF2 of
+                        { EQ -> compare wTr1 wTr2   
+                        ; others -> others }
+                   ; others -> others }  
+              ; others -> others }
          ; others -> others }
     ; others -> others }
      

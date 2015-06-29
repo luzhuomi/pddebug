@@ -1051,7 +1051,7 @@ resInREnv renv =
 
 
 compareREnv :: REnv -> REnv -> Ordering
-compareREnv r2 r1 = 
+compareREnv r1 r2 = 
   let c1   = renvSize r1
       c2   = renvSize r2
       sNc1 = countStrongNoCh r1
@@ -1069,7 +1069,24 @@ compareREnv r2 r1 =
       wSt1 = countWeakASt r1
       wSt2 = countWeakASt r2
 
-  in case compare c2 c1 of
+  in comparePairs [ (c1,c2)
+                  , ((sNc2 + wNc2), (sNc1 + wNc1))
+                  , (sNc2, sNc1)
+                  , (sTr2, sTr1)
+                  , (sSt2, sSt1)
+                  , (wTr2, wTr1)
+                  , (wSt2, wSt1)
+                  , (sMF2, sMF1)
+                  ]
+   
+comparePairs [] = EQ
+comparePairs ((x,y):rest) = 
+  case compare x y of
+    EQ -> comparePairs rest
+    otherwise -> otherwise
+                      
+   {-
+   case compare c2 c1 of
     { EQ -> case compare sNc1 sNc2 of
          { EQ -> case compare sTr1 sTr2 of
               { EQ -> case compare sSt1 sSt2 of
@@ -1084,7 +1101,7 @@ compareREnv r2 r1 =
               ; others -> others }
          ; others -> others }
     ; others -> others }
-     
+     -}
 
 
 -- count the number of ROps in renv
