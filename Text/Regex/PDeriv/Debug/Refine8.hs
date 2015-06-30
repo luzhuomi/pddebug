@@ -1073,8 +1073,8 @@ compareREnv r1 r2 =
                   , ((sNc2 + wNc2), (sNc1 + wNc1))
                   , (sNc2, sNc1)
                   , (sTr2, sTr1)
-                  , (sSt2, sSt1)
                   , (wTr2, wTr1)
+                  , (sSt2, sSt1)
                   , (wSt2, wSt1)
                   , (sMF2, sMF1)
                   ]
