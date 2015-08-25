@@ -1000,20 +1000,16 @@ reloc l' l renv  =
   
 combineRS :: RS -> RS -> RS
 combineRS rs1 rs2 = 
-  let atrs' = {-# SCC "set_union" #-} ((atrs rs1) `Set.union` (atrs rs2)) 
-      asts' = {-# SCC "append" #-} (asts rs1) ++ (asts rs2)
+  let atrs' = ((atrs rs1) `Set.union` (atrs rs2)) 
+      asts' = (asts rs1) ++ (asts rs2)
       mkfin' = mkfin rs1 + mkfin rs2
-      (s_atrs',w_atrs') = {-# SCC "partition" #-} Set.partition isStrong atrs'
+      (s_atrs',w_atrs') = Set.partition isStrong atrs'
       strong_atrs' = Set.size s_atrs'
-      strong_asts1 = strong_asts rs1
-      strong_asts2 = strong_asts rs2
-      strong_asts' = strong_asts1 `seq` strong_asts2 `seq` strong_asts1 + strong_asts2
+      strong_asts' = strong_asts rs1 + strong_asts rs2
       weak_atrs'   = Set.size w_atrs'
-      weak_asts1   = weak_asts rs1
-      weak_asts2   = weak_asts rs2
-      weak_asts'   = weak_asts1 `seq` weak_asts2 `seq` weak_asts1  + weak_asts2
-      strong_noch' = strong_atrs' `seq` strong_noch rs1 + strong_noch rs2 + (strong_asts1 + strong_asts2 - strong_atrs')
-      weak_noch'   = weak_asts `seq` weak_noch rs1 + weak_noch rs2 + (weak_atrs rs1 + weak_atrs rs2 - weak_atrs')
+      weak_asts'   = weak_asts rs1  + weak_asts rs2
+      strong_noch' = strong_noch rs1 + strong_noch rs2 + (strong_atrs rs1 + strong_atrs rs2 - strong_atrs')
+      weak_noch'   = weak_noch rs1 + weak_noch rs2 + (weak_atrs rs1 + weak_atrs rs2 - weak_atrs')
   in atrs' `seq` asts' `seq` mkfin' `seq` strong_atrs' `seq` strong_asts' `seq` strong_noch' `seq` weak_atrs' `seq` weak_asts' `seq` weak_noch'
      `seq` RS  atrs' asts' mkfin' strong_atrs'  strong_asts' strong_noch' weak_atrs' weak_asts' weak_noch' 
   
@@ -1021,7 +1017,7 @@ combineRS rs1 rs2 =
 -- combine two REnv
 combineREnv :: REnv -> REnv -> REnv 
 combineREnv renv1 renv2 = 
-  let ops_ = {-# SCC "ops_" #-} IM.unionWith (\x y -> {-# SCC "combine" #-} (x `combineRS` y)) (ops renv1) (ops renv2)
+  let ops_ = {-# SCC "ops_" #-} IM.unionWith (\x y -> (x `combineRS` y)) (ops renv1) (ops renv2)
       (countStrongATr_, countWeakATr_, countStrongNoCh_, countWeakNoCh_) = 
         {-# SCC "foldl" #-}
             ops_ `seq`
@@ -1035,7 +1031,7 @@ combineREnv renv1 renv2 =
        go :: (Int, Int, Int, Int) -> RS ->  (Int, Int, Int, Int)
        go (s,w,sn, wn) rs =
          let 
-           s' = {- rs `seq` -} s + strong_atrs rs
+           s' = rs `seq` s + strong_atrs rs
            w' = w + weak_atrs rs
            sn' = sn + strong_noch rs
            wn' = wn + weak_noch rs
@@ -1242,8 +1238,9 @@ refine :: UReq -> Re -> S.ByteString -> [Re]
 refine ureq r cs = 
   let cmap = choiceMap r 
       renvs = nub $ sortBy compareREnv (ref [(cmap, ureq, r, emptyREnv)] cs)
-      
-  in map (\renv ->  apply_ renv r)  renvs
+      -- io = renvs `seq` logger ("refine "++ (show $ map (\renv -> " | " ++ show renv  ) renvs))
+  in {- io `seq` -} 
+     map (\renv ->  apply_ renv r)  renvs
 
 -- the main routine
 -- calling urepderiv to apply the R|-^L r/l => { R,r,\sigma } over l1,...,ln
@@ -1264,22 +1261,10 @@ ref urs bs = case S.uncons bs of
                   ; Just t  -> posEmpty t }) (getLabel r) ]
   ; Just (l,w) ->
          let urs' =  prune5 $ concatMap (\ (cmap, ur,r,renv) ->  {- prune3 r $ -} urePDeriv (cmap, ur, r, renv) l) urs 
-             -- io = logger $ S.length bs -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
+             io = logger $ S.length bs -- logger ("ref " ++ (l:w) ++ (show $ map (\(_,r,renv) -> pretty r ++ "|" ++ show renv) urs) )  
          in  {- io `seq` -} urs' `seq` ref urs' w
   }
 
-{-
--- a debugging functin
-ref' :: [(UReq, Re, REnv)] -> [Char] -> [(Re,REnv)]
-ref' urs [] = [ (r,renv) | (ureq, r, renv) <- urs ] 
-ref' urs (l:w) = let 
-                     urs' = concatMap (\ (ur,r,renv) -> 
-                                    let urs'' = urePDeriv (ur, r, renv) l
-                                    in  {- prune3 r  $ -} prune5  $ map (\(ur', r', renv') -> 
-                                                   let io = logger $ ("combining " ++ show renv ++ " with " ++ show renv' ++ " yielding " ++ (show $ combineREnv renv renv')  )
-                                                   in  (ur', r',  combineREnv renv renv')) urs'') urs
-                 in ref' urs' w
--}
 {-
 pruning by checking for entailment among REnvs, looking for local optimal
 
@@ -1384,14 +1369,14 @@ hasDupROps renv = let ps = IM.toList renv
 prune5 :: [(ChMap, UReq, Re, REnv)] -> [(ChMap, UReq, Re, REnv)]
 prune5 ures = 
   let grouped = -- | re -> (ureq, re, renv)
-        foldl' (\m (cmap, ureq, re, renv) -> 
-                 case M.lookup re m of 
-                   { Nothing -> M.insert re (cmap, ureq,re,renv) m 
-                   ; Just (_,_,_,renv') -> case compareREnv renv renv' of
-                     { LT -> M.update (\_ -> Just (cmap,ureq,re,renv)) re m 
-                     ; _  -> m 
-                     }
-                   } ) M.empty ures
+        foldl (\m (cmap, ureq, re, renv) -> 
+                case M.lookup re m of 
+                  { Nothing -> M.insert re (cmap, ureq,re,renv) m 
+                  ; Just (_,_,_,renv') -> case compareREnv renv renv' of
+                    { LT -> M.update (\_ -> Just (cmap, ureq,re,renv)) re m 
+                    ; _  -> m 
+                    }
+                  } ) M.empty ures
   in map snd (M.toList grouped)
                                            
                     
@@ -1408,11 +1393,6 @@ choiceAlts (Ch _ _) _ _ = False
 choiceAlts (Eps _ ) _ _ = False
 choiceAlts Phi      _ _ = False
 choiceAlts (Any _ ) _ _ = False
-
-
--- | redundantREnv check can be make more 'static'
--- | proposition, pds of r are either in form of \epsilon, s1 ... sn, where si are sub-terms from r
--- | given a RAtr (Ch i l) rlvl, it is sufficient to check whether i is a location of a child nodes under the choice operator, where l already exist in one of the siblings under the choice operator
 
 type ChMap = IM.IntMap [Re]
 
@@ -1459,15 +1439,12 @@ redundantREnv renv cmap =
                ; _ -> False
                } 
            
-{-
 choiceSiblings :: Re -> SrcLoc -> [Re]
 choiceSiblings (Choice _ rs) i | i `elem` (concatMap getLabel rs) = rs -- TODO:  choice can be nested.
                                | otherwise = concatMap (\r -> choiceSiblings r i) rs
 choiceSiblings (Pair _ r1 r2) i = choiceSiblings r1 i ++ choiceSiblings r2 i
 choiceSiblings (Star _ r) i = choiceSiblings r i
 choiceSiblings _ _ = []
--}
-
 
 {-
 isRedundant :: REnv -> Re -> REnv -> Re -> Bool 
@@ -1625,7 +1602,7 @@ urPDeriv (ur, Choice i rs) l rlvl =
          { [] -> return []
          ; ps -> do 
             { let ur' = updateUR i (Choice dontcare ps) ur
-            ; ts <- ur' `seq` mapM (\ r -> urPDeriv (ur', r) l Strong) rs
+            ; ts <- mapM (\ r -> urPDeriv (ur', r) l Strong) rs
             ; ts `seq` return $ concat ts 
             -- todo:move i:is to each r
             }
@@ -1644,13 +1621,13 @@ urPDeriv (ur, Star i r) l rlvl  =
             { let ur' = updateUR i (Choice dontcare ps) ur
             ; t <- urPDeriv (ur',r) l Strong
             ; t `seq` return [ (ur'', Pair i r' (Star i r), renv)  
-                             | (ur'', r', renv) <- t ]
+                       | (ur'', r', renv) <- t ]
             }
          }
       ; Nothing -> do 
            { t <- urPDeriv (ur,r) l rlvl
            ; t `seq` return [ (ur', Pair i r' (Star i r), renv)  
-                            | (ur', r', renv) <- t ]
+                       | (ur', r', renv) <- t ]
            }
       }
 urPDeriv ur c rlvl  = error $ "unhandled input: " ++ (show ur) ++ "/" ++ (show c)
