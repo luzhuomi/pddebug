@@ -1369,7 +1369,7 @@ hasDupROps renv = let ps = IM.toList renv
 prune5 :: [(ChMap, UReq, Re, REnv)] -> [(ChMap, UReq, Re, REnv)]
 prune5 ures = 
   let grouped = -- | re -> (ureq, re, renv)
-        foldl (\m (cmap, ureq, re, renv) -> 
+        foldl' (\m (cmap, ureq, re, renv) -> 
                 case M.lookup re m of 
                   { Nothing -> M.insert re (cmap, ureq,re,renv) m 
                   ; Just (_,_,_,renv') -> case compareREnv renv renv' of
