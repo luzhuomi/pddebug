@@ -1524,14 +1524,14 @@ incMaxId = do
 urPDeriv :: (UReq, Re) -> Char -> RLevel -> State Env [(UReq, Re, REnv)]
 urPDeriv (ur, Eps i) l rlvl
   | i `inUR` ur = do 
-     { next_i <- incMaxId
-       -- let next_i  = i  
+     { -- next_i <- incMaxId
+       let next_i  = i  
      ; return [ ((updateUR i r' ur), Eps next_i, singletonREnv i (singletonRS {- (RASt (Ch next_i l) Strong) -} (2000+(ord l)) )) 
               | let r = fromJust (lookupUR i ur), r' <- pderiv r l ] 
      }
   | otherwise   = do 
-     { next_i <- incMaxId 
-       -- let next_i  = i    
+     { -- next_i <- incMaxId 
+       let next_i  = i    
      ; return [ (ur, Eps next_i, singletonREnv i (singletonRS {- (RASt (Ch next_i l) (maximal rlvl Weak)) -} (case rlvl of { Weak -> (3000+(ord l))  ; Strong -> (2000+(ord l)) })  )) ]
      }
 urPDeriv (ur, (Ch i l)) l' rlvl = 
@@ -1543,7 +1543,7 @@ urPDeriv (ur, (Ch i l)) l' rlvl =
       }
              | l /= l' -> do 
       { -- next_i <- incMaxId
-      ; next_i2 <- incMaxId
+      -- ; next_i2 <- incMaxId
       ; return  [ ((updateUR i r' ur), (Eps i), singletonREnv i (singletonRS {- (RATr (Ch next_i2 l') Strong)-} (ord l'))) | r' <- pderiv r l]
       }
     ; Nothing | l == l' -> do 
@@ -1552,7 +1552,7 @@ urPDeriv (ur, (Ch i l)) l' rlvl =
       }
               | l /= l' -> do 
       { -- next_i <- incMaxId
-      ; next_i2 <- incMaxId
+      -- ; next_i2 <- incMaxId
       ; return [ (ur, Eps i, singletonREnv i (singletonRS $ {- RATr (Ch next_i2 l') (maximal rlvl Weak) -} case rlvl of { Strong -> ord l' ; Weak -> 1000 + (ord l')}) ) ] 
       }
     }
@@ -1685,7 +1685,7 @@ apply renv r =
          case lookupREnv i renv' of 
            { Just rs -> do 
                 { let trans = map (fromJust . reInROp) (Set.toList (atrs rs))
-                      states = map (fromJust . reInROp) (asts rs)
+                      states = map (fromJust . reInROp) (reverse (asts rs))
                       eps  = if (mkfin rs) > 0 then True else False
                 -- create a sequence concatenation out of the add-states ops
                 ; ss' <- mkSeqS =<< mapM (apply renv') states
@@ -1705,7 +1705,7 @@ apply renv r =
            case lookupREnv i renv' of 
              { Just rs -> do 
                   { let trans = map (fromJust . reInROp) (Set.toList (atrs rs))
-                        states = map (fromJust . reInROp) (asts rs)
+                        states = map (fromJust . reInROp) (reverse (asts rs))
                         eps  = if (mkfin rs) > 0 then True else False
                         -- create a sequence concatenation out of the add-states ops 
                   ; ss' <- mkSeqS =<< mapM (apply renv') states
@@ -1739,7 +1739,7 @@ apply renv r =
              case lookupREnv i renv' of 
                { Just rs -> do 
                     { let trans = map (fromJust . reInROp) (Set.toList (atrs rs))
-                          states = map (fromJust . reInROp) (asts rs)
+                          states = map (fromJust . reInROp) (reverse (asts rs))
                           eps  = if (mkfin rs) > 0 then True else False
                     ; ss' <- mkSeqS =<< mapM (apply renv') states
                              -- append ss' to s

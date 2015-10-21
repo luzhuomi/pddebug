@@ -436,11 +436,13 @@ instance Ord PDError where
         numLocs2 = length $ getLocs err2
     in if (numLocs1 == numLocs2) 
        then case (err1,err2) of
-         { (LabelMismatch _ _, _) -> LT
+         { (LabelMismatch s1 _, LabelMismatch s2 _) -> s2 `compare` s1 -- greater src loc is always on the right of the smaller src loc
+         ; (LabelMismatch _ _, _) -> LT
+         ; (EmptyMismatch s1,   EmptyMismatch s2) -> s2 `compare` s1
          ; (EmptyMismatch _,   _) -> GT
          ; _                      -> EQ
          }
-       else compare numLocs1 numLocs2
+       else compare numLocs2 numLocs1
 
 
 
@@ -483,8 +485,8 @@ test2 regex str =
     Left err -> Left ("parseRegex for Text.Regex.PDeriv.ByteString failed:"++show err)
     Right pat -> let r = (rAnnotate . coer . strip) pat 
                  in Right $ case (start [] (matchM r str)) of
-                   { ([], errs@(_:_)) -> let err = head $ reverse $ sort errs
-                                         in highlight r err
+                   { (_, errs@(_:_)) -> let err = head $ sort errs -- this won't guarantee this error make sense, e.g. (a_1|b_2)*a_3 with aac will yield aa goes to (a|b)*, and c mismatched with a_1 or b_2
+                                        in (highlight r err) ++ "|||||" ++ (show $ length $ getLocs err)
                    ; ([], []) -> "no match, no error found"
                    ; (_, _) -> "matched" }
 

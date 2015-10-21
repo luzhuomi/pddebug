@@ -1,4 +1,4 @@
-import Text.Regex.PDeriv.Debug.Refine9
+import Text.Regex.PDeriv.Debug.Refine10
 import System.Environment
 import qualified Data.ByteString.Char8 as S
 
@@ -9,4 +9,5 @@ main :: IO ()
 main = do 
   (filename:args) <- getArgs
   file <- S.readFile filename
-  print $ test g ".*<h1 class=\"header-gray\">\n([a-zA-Z\n]*)</h1>.*" file
+  print $ test2 g ".*<h1 class=\"header-gray\">[\n\r]*([a-zA-Z;&, \\\n\t\r]*)</h1>.*" file
+  -- print $ test2 g ".*aa(b*)aa.*" (S.pack "cabac")
