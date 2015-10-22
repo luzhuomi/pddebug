@@ -8,6 +8,20 @@
 -- Regular Expression Pattern Matching via Derivatives
 --------------------------------------------------------------------------------
 
+{-
+// this reporting algorithm is not very helpful, as it lacks of the global minimum fixes view.
+// e.g. 
+// regex ".*abc.*"
+// word "cbc"
+// there are at least 2 mismatch errors
+// 1) cb consumed by .*, and c clashes with a
+// 2) nothing is consumed c clashes with a (left most)
+// which error shall we report? reporting 1) if we consider it produces a longer submatches,  however, report the c-a clashing 
+// is not very helpful, as fixing it does not produce a match
+// on the other hand, the report produced by 2) seems to be making sense. But how do we know which is the best error to report? (based on the minimum fixes)
+
+-}
+
 module Text.Regex.PDeriv.Debug.Report where
 
 
